@@ -35,16 +35,14 @@ class BinanceClient:
         self._is_connected()
 
         self.contracts = self._get_contracts()
-        self.prices = {}
+        self.prices: Dict[str, Price] = dict()
         
         # Websocket connection
         self._id = 1
-        self.subscription_list = {}
-        self.ws = websocket.WebSocketApp(self._ws_url, on_open=self._on_open,
-                                         on_message=self._on_message,
-                                         on_error=self._on_error,
-                                         on_close=self._on_close)
-        t = Thread(target=self.ws.run_forever)
+        self.bookTicker_subscribtion_list: Dict[str, int] = dict()
+        
+        self._reconnect = True
+        t = Thread(target=self._start_ws)
         t.start()
         
     def _execute_request(self, endpoint: str, params: Dict, http_method: str):
@@ -93,7 +91,6 @@ class BinanceClient:
             return contracts
         return None
             
-
     def get_candlestick(self, contract: Contract, interval="4h") -> List[CandleStick]:
         params = {"symbol": contract.symbol, "interval": interval}
         response = self._execute_request(endpoint="/fapi/v1/klines", 
@@ -162,15 +159,39 @@ class BinanceClient:
         return self.balance
 
     ############################ Websocket ############################
+    def _start_ws(self):
+        self.ws = websocket.WebSocketApp(self._ws_url,
+                                         on_open=self._on_open, on_close=self._on_close,
+                                         on_error=self._on_error, on_message=self._on_message)
+        # Reopen the websocket connection if it terminated
+        while True:
+            try:
+                if self._reconnect:  # Reconnect unless the interface is closed by the user
+                    self.ws.run_forever()  # Blocking method that ends only if the websocket connection drops
+                else:
+                    break
+            except Exception as e:
+                # Update the log about this error
+                print("Binance error in run_forever() method: %s", e)
+            # Add sleeping interval
+            time.sleep(3)
+    
+    
     def _on_open(self, ws: websocket.WebSocketApp):
         print('Websocket connected')
-        self.new_subscribe()
         
     def _on_message(self, ws: websocket.WebSocketApp, msg):
         data = json.loads(msg)
         if 'e' in data.keys():
-            print('\n')
-            print(f"Symbol: {data['s']}\taskPrice: {data['a']}\tbidPrice: {data['b']}")
+            if data['e']=='bookTicker':
+                symbol = data['s']
+                # If new untracked symbol
+                if symbol not in self.prices.keys():
+                    self.prices[symbol] = self.get_price(self.contracts[symbol])
+                # Update ask/bid prices
+                self.prices[symbol].bid = data['b']
+                self.prices[symbol].ask = data['a']
+                print(f"Symbol: {data['s']}\taskPrice: {data['a']}\tbidPrice: {data['b']}")
              
     def _on_error(self, ws: websocket.WebSocketApp, error):
         print(f"Error: {error}")
@@ -179,17 +200,26 @@ class BinanceClient:
         print("Websoccet disconnect")
         
     def new_subscribe(self, symbol='btcusdt', channel ='bookTicker'):
-        msg = {"method": 'SUBSCRIBE', "params":[symbol.lower()+'@'+channel], "id": self._id}
-        self.ws.send(json.dumps(msg))
-        
-        self.subscription_list[self._id] = {"params":[symbol.lower()+'@'+channel]}
-        self._id += 1
-        
-    def unsubscribe_stream(self, _id):
+        params = f"{symbol.lower()}@{channel}"
+        if symbol.lower() in self.bookTicker_subscribtion_list:
+            print(f"Already subscribed to {params} channel")
+        else:
+            msg = {"method": 'SUBSCRIBE', "params":[params], "id": self._id}
+            self.get_price(self.contracts[symbol.upper()])
+            
+            self.ws.send(json.dumps(msg))
+            self.bookTicker_subscribtion_list[self._id] = {"params":[symbol.lower()+'@'+channel]}
+            self.bookTicker_subscribtion_list[symbol.lower()] = self._id
+            self._id += 1
+            
+    def unsubscribe_channel(self, symbol: str, channel='bookTicker'):
+        symbol = symbol.lower()
+        _id = self.bookTicker_subscribtion_list[symbol]
         msg = {"method": 'UNSUBSCRIBE', 
-               'params':self.subscription_list[_id]['params'],
+               'params':[f"{symbol}@{channel}"],
                "id": _id}
         self.ws.send(json.dumps(msg))
-        self.subscription_list.pop(_id)
+        self.bookTicker_subscribtion_list.pop(symbol)
+        self.prices.pop(symbol.upper())
     
     
