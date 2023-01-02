@@ -170,3 +170,6 @@ poetry.toml
 ### Ignore jupyter notebooks
 *.ipynb
 # End of https://www.toptal.com/developers/gitignore/api/python
+
+### Ignore vscode
+*.code-workspace
