@@ -25,9 +25,10 @@ class CandleStick:
             
             
 class Price:
-    def __init__(self, response: Dict[str, str|int], exchange: str):
+    def __init__(self, response: Dict[str, str], exchange: str):
         if exchange == 'Binance':
-            self.symbol = response['symbol']
+            self.exchange = 'Binance'
+            self.symbol: str = response['symbol']
             self.bid = float(response['bidPrice'])
             self.ask = float(response['askPrice'])
             
