@@ -5,23 +5,23 @@ class Contract:
     def __init__(self, response: Dict, exchange: str):
         self.exchange = exchange
         if exchange == 'Binance':
-            self.symbol = response['symbol'] #BTCUSDT
-            self.baseAsset = response['baseAsset'] #BTC
-            self.quoteAsset = response['quoteAsset'] #USDT
-            self.pricePrecision = response['pricePrecision']
-            self.quantityPrecision = response['quantityPrecision']
+            self.symbol: str = response['symbol'] # BTCUSDT
+            self.baseAsset: str = response['baseAsset'] # BTC
+            self.quoteAsset: str = response['quoteAsset'] # USDT
+            self.pricePrecision = int(response['pricePrecision'])
+            self.quantityPrecision = int(response['quantityPrecision'])
+            self.minQuantity = float(response['filters'][2]['minQty'])
             
     
 class CandleStick:
-    def __init__(self, response: List[float], exchange: str):
+    def __init__(self, response: List, exchange: str):
         if exchange == 'Binance':
-            self.timestamp = response[6] # Close time
+            self.timestamp: int = response[0]
             self.open = float(response[1])
             self.high = float(response[2])
             self.low = float(response[3])
             self.close = float(response[4])
             self.volume = float(response[5])
-            self.trades_number = response[8]
             
             
 class Price:
