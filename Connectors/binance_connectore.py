@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import hashlib
 import json
@@ -23,20 +22,16 @@ load_dotenv()
 
 
 class BinanceClient:
-    def __init__(self):
+    def __init__(self, is_spot: bool, is_test: bool):
         self.exchange = "Binance"
-        self._base_url = "https://testnet.binancefuture.com"
-        self._ws_url = "wss://stream.binancefuture.com/ws"
-        self._header = {
-            "X-MBX-APIKEY": os.getenv("BinanceFutureTestAPIKey"),
-            "Content-Type": "application/json",
-        }
-
-        self._http_dict = {
-            "GET": requests.get,
-            "POST": requests.post,
-            "DELETE": requests.delete,
-        }
+        
+        self._init(is_spot, is_test)
+        self._header = {"X-MBX-APIKEY": os.getenv(self._api_key),
+                        "Content-Type": "application/json"}
+        
+        self._http_dict = {"GET": requests.get,
+                           "POST": requests.post,
+                           "DELETE": requests.delete}
         self.logger = logging.getLogger("log_module")
 
         # Check internet connection
@@ -69,7 +64,31 @@ class BinanceClient:
         self._reconnect = True
         t = Thread(target=self._start_ws)
         t.start()
-
+        
+    def _init(self, is_spot: bool, is_test: bool):
+        # Spot Trading
+        # Test Net
+        if is_spot and is_test:
+            self._base_url = 'https://testnet.binance.vision/api'
+            self._ws_url = 'wss://testnet.binance.vision/ws'
+        # Real Spot trading
+        elif is_spot and not is_test:
+            self._base_url = 'https://api.binance.com/api'
+            self._ws_url = 'wss://stream.binance.com:9443/ws'
+        
+        # Future Trading
+        # Test net
+        elif not is_spot and is_test:
+            self._base_url = 'https://testnet.binancefuture.com'
+            self._ws_url = 'wss://stream.binancefuture.com/ws'
+        # Real Future
+        elif not is_spot and not is_test:
+            self._base_url = 'https://fapi.binance.com'
+            self._ws_url = 'wss://fstream.binance.com/ws'
+            
+        self._api_key = f"Binance{'Spot' if is_spot else 'Future'}{'Test' if is_test else ''}APIKey"
+        self._api_secret = self._api_key.replace('APIKey', 'APISecret')     
+    
     def _execute_request(self, endpoint: str, params: Dict, http_method: str):
         try:
             # Get the timestamp
@@ -91,7 +110,7 @@ class BinanceClient:
 
     def _generate_signature(self, query_string: str):
         return hmac.new(
-            os.getenv("BinanceFutureTestAPISecret").encode("utf-8"),
+            os.getenv(self._api_secret).encode("utf-8"),
             query_string.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
