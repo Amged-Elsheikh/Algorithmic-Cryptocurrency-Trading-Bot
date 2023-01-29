@@ -59,8 +59,13 @@ class BinanceClient:
         self.id = 1
         self.bookTicker_subscribtion_list: Dict[Contract, int] = dict()
         # running_startegies key: "symbol_id", value: strategy object
-        self.running_startegies: Dict[str, Strategy] = dict()
-        
+        self.running_startegies: Set[Strategy] = set()
+        self.strategy_counter: Dict[str, Dict[str, int]] = dict()
+        """
+        when a new strategyy added, the counter will increase, and when strategy is executed/canceled, counter will go down. 
+        Once counter reach Zero, unsubscribe the aggTrade channel. The first key is the symbol, and the item is another dictionary.
+        For the 2nd dict, the keys are the counter 'count' and the 'id' for the web socket
+        """
         self._reconnect = True
         t = Thread(target=self._start_ws)
         t.start()
@@ -230,9 +235,10 @@ class BinanceClient:
                 self.prices[symbol].bid = data["b"]
                 self.prices[symbol].ask = data["a"]
                 
-                if symbol in self.running_startegies.keys():
-                    strategy = self.running_startegies[symbol]
-                    self._check_tp_sl(strategy)
+                for strategy in self.running_startegies:
+                    if symbol == strategy.contract.symbol:
+                        self._check_tp_sl(strategy)
+                        break
             
             elif data["e"] == "aggTrade": # Used to update indicators and make trading decision
                 """
@@ -243,14 +249,14 @@ class BinanceClient:
                 volume = float(data['q'])
                 timestamp = int(data['t'])
                 
-                for symbol_id, strategy in self.running_startegies.items():
+                for strategy in self.running_startegies:
                     if strategy.is_running:
-                        if symbol==symbol_id.split("_")[0]:
+                        if symbol==strategy.contract.symbol:
                             decision = strategy.parse_trade(trade_price, volume, timestamp)
                             self._process_dicision(strategy, decision, latest_price=trade_price)
+                            break
                     else:
-                        self.running_startegies.pop(symbol_id)
-                        self.unsubscribe_channel(symbol, 'aggTrade')
+                        self.unsubscribe_channel(symbol, 'aggTrade', strategy)
 
     def _check_tp_sl(self, strategy: 'Strategy'):
                 # Calculate the uPnL only when an order is made  
@@ -264,8 +270,7 @@ class BinanceClient:
                 if sell_order:
                     strategy.order = sell_order
                     strategy.is_running = False
-                    self.running_startegies.pop(strategy.contract.symbol)
-                    self.unsubscribe_channel(strategy.contract.symbol, 'aggTrade')
+                    self.unsubscribe_channel(strategy.contract.symbol, 'aggTrade', strategy)
 
     def _on_error(self, ws: websocket.WebSocketApp, error):
         print(f"Error: {error}")
@@ -289,14 +294,17 @@ class BinanceClient:
                 self.id += 1
 
         elif channel == "aggTrade":
-            msg = {"method": "SUBSCRIBE", "params": [params], "id": self.id}
-            # Subscribe to the websocket channel
-            self.ws.send(json.dumps(msg))
-            # Update the aggTrade list from the strategy object
-            self.id += 1
+            if symbol not in self.strategy_counter.keys():
+                msg = {"method": "SUBSCRIBE", "params": [params], "id": self.id}
+                # Subscribe to the websocket channel
+                self.ws.send(json.dumps(msg))
+                self.strategy_counter[symbol] = {'count': 1, 'id': self.id}
+                # Update the aggTrade list from the strategy object
+                self.id += 1
 
-    def unsubscribe_channel(self, symbol: str, channel="bookTicker"):
+    def unsubscribe_channel(self, symbol: str, channel="bookTicker", strategy: None|'Strategy'= None):
         params = [f"{symbol.lower()}@{channel}"]
+        
         if channel == "bookTicker":
             _id = self.bookTicker_subscribtion_list[self.contracts[symbol]]
             msg = {"method": "UNSUBSCRIBE", 
@@ -306,7 +314,13 @@ class BinanceClient:
             self.prices.pop(symbol)
         
         elif channel == "aggTrade":
-            pass
+            self.strategy_counter[symbol]['count'] -= 1
+            if self.strategy_counter[symbol]['count'] == 0:
+                msg = {"method": "UNSUBSCRIBE", "params": params,
+                       "id": self.strategy_counter[symbol]['id']}
+                self.ws.send(json.dumps(msg))
+                self.strategy_counter.pop(symbol)
+                self.running_startegies.pop(strategy)
 
     def _process_dicision(self, strategy: 'Strategy', decision: str, latest_price: float):
         if 'buy' in decision.lower and strategy.order is None:
@@ -336,6 +350,5 @@ class BinanceClient:
                 if sell_order:
                     strategy.order = sell_order
                     strategy.is_running = False
-                    self.running_startegies.pop(strategy.contract.symbol)
-                    self.unsubscribe_channel(strategy.contract.symbol, 'aggTrade')
+                    self.unsubscribe_channel(strategy.contract.symbol, 'aggTrade', strategy)
                 pass

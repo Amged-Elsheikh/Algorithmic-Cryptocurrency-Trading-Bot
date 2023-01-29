@@ -22,6 +22,10 @@ class Strategy:
                  buy_pct: float):
         # running_strategies variable is a dictionary where the key is the symbol and the values is another
         self.client = client
+        if self.client.exchange=='Binance':
+            # To unsubscribe a channel in binance, you need to provide an id
+            self.id = self.client.id
+            
         self.contract = self.client.contracts[symbol]
         self.timeframe = self.intervals_to_sec[interval] * 1000
         self.candles = self.client.get_candlestick(self.contract, self.interval)
@@ -52,7 +56,7 @@ class Strategy:
         self._af_max = af_max
         self._trend = "up"  # intialize as a up trend
         
-        self.client.running_startegies[f"{symbol}_{self.client.id}"] = self
+        self.client.running_startegies.add(self)
 
     def _update_candles(self, price: float, volume: float, timestamp: int) -> str:
         """
