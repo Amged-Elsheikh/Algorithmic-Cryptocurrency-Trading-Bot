@@ -26,7 +26,8 @@ class Strategy:
         self.timeframe = self.intervals_to_sec[interval] * 1000
         self.candles = self.client.get_candlestick(self.contract, self.interval)
         self.order: Order | None = None
-        self.is_running = True
+        self.is_running = True 
+        """Use this to remove the strategy from the connector after it been closed"""
         
         self.tp = tp # Take profit
         self.sl = sl # Stop Loss
@@ -101,10 +102,12 @@ class Strategy:
             ]
             return "new candle"
 
-    def parse_trade(self) -> str:
+    def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
         """
         This function will keep updating the technical indicators values and trade if needed
         """
+        self._update_candles(price, volume, timestamp)
+        
         ema_check = 3 * int(self._EMA(self.ema[0]) > self._EMA(self.ema[1]))
 
         macd, macd_signal = self._MACD()

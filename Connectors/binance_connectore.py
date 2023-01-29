@@ -217,29 +217,55 @@ class BinanceClient:
     def _on_message(self, ws: websocket.WebSocketApp, msg):
         data = json.loads(msg)
         if "e" in data.keys():
-            if data["e"] == "bookTicker":
-                """bookTicker message is pushed when either of the bid or ask changes"""
-                symbol = data["s"]
+            symbol = data["s"]
+            if data["e"] == "bookTicker": # Used to track a trading pairs and calculate PnL
+                """
+                bookTicker message is pushed when either of the bid or ask changes. 
+                Subscribe to the bookTicker to track a contract pair, or when starting new strategy
+                """
                 # If new untracked symbol
                 if symbol not in self.prices.keys():
                     self.prices[symbol] = self.get_price(self.contracts[symbol])
                 # Update ask/bid prices
                 self.prices[symbol].bid = data["b"]
                 self.prices[symbol].ask = data["a"]
-
-                if symbol in self.current_strategies.keys():
-                    self.current_strategies[symbol] = self.prices[symbol]
-
-            elif data["e"] == "aggTrade":
-                """AggTrade message is send when a trade is made"""
-                symbol = data["s"]
+                
+                if symbol in self.running_startegies.keys():
+                    strategy = self.running_startegies[symbol]
+                    self._check_tp_sl(strategy)
+            
+            elif data["e"] == "aggTrade": # Used to update indicators and make trading decision
+                """
+                AggTrade message is send when a trade is made. 
+                Subscribe to this channel when starting new strategy, and cancel the subscribtion once the strategy is stopped.
+                """
+                trade_price = float(data['p'])
+                volume = float(data['q'])
+                timestamp = int(data['t'])
+                
                 for symbol_id, strategy in self.running_startegies.items():
                     if strategy.is_running:
                         if symbol==symbol_id.split("_")[0]:
-                            decision = strategy.parse_trade()
-                            self._process_dicision(strategy, decision, latest_price=float(data['p']))
+                            decision = strategy.parse_trade(trade_price, volume, timestamp)
+                            self._process_dicision(strategy, decision, latest_price=trade_price)
                     else:
                         self.running_startegies.pop(symbol_id)
+                        self.unsubscribe_channel(symbol, 'aggTrade')
+
+    def _check_tp_sl(self, strategy: 'Strategy'):
+                # Calculate the uPnL only when an order is made  
+        if strategy.is_running and strategy.order is not None:
+            buying_price = strategy.order.price
+            pnl = (1 - self.prices[strategy.contract.symbol].ask / buying_price) * 100
+                # Take Profit or Stop Loss check
+            if (pnl > 0 and pnl >= strategy.tp) or (pnl < 0 and abs(pnl)>= strategy.sl):
+                sell_order = self._make_order(self.contracts[strategy.contract.symbol], 'SELL',
+                                              order_type='MARKET', quantity=strategy.order.quantity)
+                if sell_order:
+                    strategy.order = sell_order
+                    strategy.is_running = False
+                    self.running_startegies.pop(strategy.contract.symbol)
+                    self.unsubscribe_channel(strategy.contract.symbol, 'aggTrade')
 
     def _on_error(self, ws: websocket.WebSocketApp, error):
         print(f"Error: {error}")
@@ -282,19 +308,34 @@ class BinanceClient:
         elif channel == "aggTrade":
             pass
 
-    def _process_dicision(self, strategy: Strategy, decision:str, latest_price: float):
-        if decision == "buy or hodl":
-            if strategy.order is None:
-                # Binance don't allow less than 10$ transaction
-                min_qty_margin = max(10/latest_price, strategy.contract.minQuantity)
-                base_asset = strategy.contract.quoteAsset
-                balance = self.balance[base_asset]
-                
-                buy_margin = balance.availableBalance * strategy.buy_pct
-                quantity_margin = round(buy_margin/latest_price, strategy.contract.quantityPrecision)
-                
-                if quantity_margin > min_qty_margin:
-                    strategy.order = self._make_order(strategy.contract, order_side='BUY',
-                                                      order_type='MARKET', quantity=quantity_margin)
-                else:
-                    print(f"{self.strategy.contract.symbol} buying option could not be made because the ordered quantity is less than the minimum margin")
+    def _process_dicision(self, strategy: 'Strategy', decision: str, latest_price: float):
+        if 'buy' in decision.lower and strategy.order is None:
+            # Binance don't allow less than 10$ transaction
+            min_qty_margin = max(10/latest_price, strategy.contract.minQuantity)
+            base_asset = strategy.contract.quoteAsset # USDT or BUSD, etc..
+            balance = self.balance[base_asset] # get the balance information 
+            
+            buy_margin = balance.availableBalance * strategy.buy_pct # Calculate the desired money for trade
+            
+             # calculate order quantity and apply 5% negative slippage
+            quantity_margin = round((buy_margin/latest_price)*0.95 ,strategy.contract.quantityPrecision) # 
+            
+            if quantity_margin > min_qty_margin:
+                strategy.order = self._make_order(strategy.contract, order_side='BUY',
+                                                    order_type='MARKET', quantity=quantity_margin)
+                print(f"{strategy.order.symbol} buying order was made. Quantity: {strategy.order.quantity}. Price: {strategy.order.price}")
+                # Update Dashboard to start tracking running orders
+            else:
+                print(f"{self.strategy.contract.symbol} buying option could not be made because the ordered quantity is less than the minimum margin")
+        
+        elif 'sell' in decision.lower() and strategy.order is not None:
+                # If there is an existing order and indicators are not good, SELL
+                sell_order = self._make_order(strategy.contract, order_side='SELL',
+                                                  order_type='MARKET', 
+                                                  quantity=strategy.order.quantity)
+                if sell_order:
+                    strategy.order = sell_order
+                    strategy.is_running = False
+                    self.running_startegies.pop(strategy.contract.symbol)
+                    self.unsubscribe_channel(strategy.contract.symbol, 'aggTrade')
+                pass
