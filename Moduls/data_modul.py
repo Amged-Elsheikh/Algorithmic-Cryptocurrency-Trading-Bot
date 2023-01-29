@@ -50,9 +50,6 @@ class Order:
 class Balance:
     def __init__(self, response, exchange):
         if exchange == 'Binance':
-            self.asset: str = response['asset']
-            self.balance = float(response['walletBalance'])
+            self.asset: str = response['asset'] # USDT
             self.pnl = float(response['unrealizedProfit'])
             self.availableBalance = float(response['availableBalance'])
-            
-            
