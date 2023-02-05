@@ -29,10 +29,12 @@ class Strategy:
         self.contract = self.client.contracts[symbol]
         self.timeframe = self.intervals_to_sec[interval] * 1000
         self.candles = self.client.get_candlestick(self.contract, self.interval)
-        self.order: Order | None = None
-        self.is_running = True 
-        """Use this to remove the strategy from the connector after it been closed"""
+        self.order: List[Order] = []
+        self.had_assits = False
+        self.is_running = True
+        """Use this to remove the strategy from the connector after it's been closed"""
         
+        self.relaizedPnL = 0
         self.tp = tp # Take profit
         self.sl = sl # Stop Loss
         self.buy_pct = buy_pct # The percentage of available balance to use for the trade

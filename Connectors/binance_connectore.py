@@ -255,7 +255,8 @@ class BinanceClient:
                 self.prices[symbol].ask = data["a"]
                 
                 for strategy in self.running_startegies:
-                    if symbol == strategy.contract.symbol:
+                    if symbol == strategy.contract.symbol and strategy.had_assits:
+                        # Calculate the uPnL only when an order is made
                         self._check_tp_sl(strategy)
                         break
             
@@ -278,25 +279,35 @@ class BinanceClient:
                         self.unsubscribe_channel(symbol, 'aggTrade', strategy)
 
     def _check_tp_sl(self, strategy: 'Strategy'):
-                # Calculate the uPnL only when an order is made  
-        if strategy.is_running and strategy.order is not None:
-            buying_price = strategy.order.price
-            pnl = (1 - self.prices[strategy.contract.symbol].ask / buying_price) * 100
-                # Take Profit or Stop Loss check
-            if (pnl > 0 and pnl >= strategy.tp) or (pnl < 0 and abs(pnl)>= strategy.sl):
-                sell_order = self._make_order(self.contracts[strategy.contract.symbol], 'SELL',
-                                              order_type='MARKET', quantity=strategy.order.quantity)
-                if sell_order:
-                    strategy.order = sell_order
-                    strategy.is_running = False
-                    self.unsubscribe_channel(strategy.contract.symbol, 'aggTrade', strategy)
-
+        buying_price = strategy.order.price
+        pnl = (1 - self.prices[strategy.contract.symbol].ask / buying_price) * 100
+        # Take Profit or Stop Loss check
+        if pnl > 0 and pnl >= strategy.tp:
+            self._take_profit(strategy)
+        elif pnl < 0 and abs(pnl)>= strategy.sl:
+            self._stop_loss(strategy)
+                
     def _on_error(self, ws: websocket.WebSocketApp, error):
         print(f"Error: {error}")
 
     def _on_close(self, ws: websocket.WebSocketApp):
         print("Websoccet disconnect")
 
+    def _stop_loss(self, strategy: 'Strategy'):
+        sell_order = self._make_order(self.contracts[strategy.contract.symbol], 'SELL',
+                                      order_type='MARKET', quantity=strategy.order.quantity)
+        if sell_order:
+            strategy.had_assits = False
+            strategy.relaizedPnL -= (strategy.order.quantity * strategy.order.price) - (sell_order.quantity * sell_order.price)
+            self.order = sell_order
+            
+    def _take_profit(self, strategy: 'Strategy'):
+        sell_order = self._make_order(self.contracts[strategy.contract.symbol], 'SELL',
+                                      order_type='MARKET', quantity=strategy.order.quantity/2)
+        if sell_order:
+            strategy.relaizedPnL += (sell_order.quantity * sell_order.price) - (strategy.order.quantity * strategy.order.price)
+            strategy.order = sell_order       
+    
     def new_subscribe(self, symbol="BTCUSDT", channel="bookTicker"):
         params = f"{symbol.lower()}@{channel}"
         if channel == "bookTicker":
@@ -342,7 +353,7 @@ class BinanceClient:
                 self.running_startegies.pop(strategy)
 
     def _process_dicision(self, strategy: 'Strategy', decision: str, latest_price: float):
-        if 'buy' in decision.lower and strategy.order is None:
+        if 'buy' in decision.lower and not strategy.had_assits:
             # Binance don't allow less than 10$ transaction
             min_qty_margin = max(10/latest_price, strategy.contract.minQuantity)
             base_asset = strategy.contract.quoteAsset # USDT or BUSD, etc..
@@ -355,19 +366,19 @@ class BinanceClient:
             
             if quantity_margin > min_qty_margin:
                 strategy.order = self._make_order(strategy.contract, order_side='BUY',
-                                                    order_type='MARKET', quantity=quantity_margin)
-                print(f"{strategy.order.symbol} buying order was made. Quantity: {strategy.order.quantity}. Price: {strategy.order.price}")
+                                                  order_type='MARKET', quantity=quantity_margin)
+                if strategy.order:
+                    strategy.had_assits = True
+                    print(f"{strategy.order.symbol} buying order was made. Quantity: {strategy.order.quantity}. Price: {strategy.order.price}")
                 # Update Dashboard to start tracking running orders
             else:
                 print(f"{self.strategy.contract.symbol} buying option could not be made because the ordered quantity is less than the minimum margin")
         
-        elif 'sell' in decision.lower() and strategy.order is not None:
+        elif 'sell' in decision.lower() and strategy.had_assits:
                 # If there is an existing order and indicators are not good, SELL
                 sell_order = self._make_order(strategy.contract, order_side='SELL',
-                                                  order_type='MARKET', 
-                                                  quantity=strategy.order.quantity)
+                                              order_type='MARKET', quantity=strategy.order.quantity)
                 if sell_order:
+                    strategy.relaizedPnL -= (strategy.order.quantity * strategy.order.price) - (sell_order.quantity * sell_order.price)
                     strategy.order = sell_order
-                    strategy.is_running = False
-                    self.unsubscribe_channel(strategy.contract.symbol, 'aggTrade', strategy)
-                pass
+                    strategy.had_assits = False
