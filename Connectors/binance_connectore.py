@@ -332,7 +332,7 @@ class BinanceClient:
                 # Update the aggTrade list from the strategy object
                 self.id += 1
 
-    def unsubscribe_channel(self, symbol: str, channel="bookTicker", strategy: None|'Strategy'= None):
+    def unsubscribe_channel(self, symbol: str, channel="bookTicker", strategy: Union[None,'Strategy']= None):
         params = [f"{symbol.lower()}@{channel}"]
         
         if channel == "bookTicker":

@@ -13,16 +13,14 @@ from Moduls.data_modul import *
 from dashboard.dashboard_callbacks import *
 
 
-binance_client = BinanceClient()
-candles = binance_client.get_candlestick(binance_client.contracts['BTCUSDT'], '4h')
+binance_client = BinanceClient(is_spot=False, is_test=True)
 
-print('hi')
-# exchanges = {"Binance":binance_client.contracts}
+exchanges = {"Binance":binance_client.contracts}
 
-# app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-# app.layout = html.Div([contracts_layout(exchanges), 
-#                       dcc.Interval(id='watchlist_interval', interval=1000)])
+app.layout = html.Div([contracts_layout(exchanges), 
+                      dcc.Interval(id='watchlist_interval', interval=1000)])
 
-# if __name__ == '__main__':
-#     app.run(debug=True)
+if __name__ == '__main__':
+    app.run(debug=True)
