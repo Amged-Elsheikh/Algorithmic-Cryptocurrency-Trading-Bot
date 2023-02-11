@@ -7,6 +7,9 @@ from Moduls.data_modul import *
 if TYPE_CHECKING:
     from Connectors.binance_connectore import BinanceClient
 
+import warnings
+warnings.filterwarnings('ignore')
+
 
 m = 60
 h = 60 * m
@@ -16,10 +19,9 @@ intervals_to_sec = { "1m": m, "15m": 15 * m, "30m": 30 * m,
                     "12h": 12 * h, "1d": d, "2d": 2 * d}
 class Strategy:
 
-    def __init__(self,client: 'BinanceClient',symbol: str,interval: str,
-                 ema: list[int], macd: dict[str, int], rsi: int,
-                 af: float, af_max: float, tp: float, sl: float,
-                 buy_pct: float):
+    def __init__(self, client: 'BinanceClient', symbol: str, interval: str,
+                 ema: Dict[str, int], macd: Dict[str, int], tp: float, sl: float,
+                 buy_pct: float, af=0.02, af_max=0.2, af_step=0.02, rsi=24):
         # running_strategies variable is a dictionary where the key is the symbol and the values is another
         self.client = client
         if self.client.exchange=='Binance':
@@ -27,8 +29,9 @@ class Strategy:
             self.id = self.client.id
             
         self.contract = self.client.contracts[symbol]
-        self.timeframe = self.intervals_to_sec[interval] * 1000
-        self.candles = self.client.get_candlestick(self.contract, self.interval)
+        self.timeframe = intervals_to_sec[interval] * 1000
+        
+        candles = self.candles = self.client.get_candlestick(self.contract, interval)
         self.order: List[Order] = []
         self.had_assits = False
         self.is_running = True
@@ -40,25 +43,30 @@ class Strategy:
         self.buy_pct = buy_pct # The percentage of available balance to use for the trade
 
         columns = ["timestamp", "open", "close", "high", "low", "volume"]
-        data = {
-            col: [eval(f"self.candles[{i}].{col}") for i in range(len(self.candles))]
-            for col in columns
-        }
+        
+        data = {'timestamp': [self.candles[i].timestamp for i in range(len(self.candles))],
+                'open': [self.candles[i].open for i in range(len(self.candles))],
+                'close': [self.candles[i].close for i in range(len(self.candles))],
+                'high': [self.candles[i].high for i in range(len(self.candles))],
+                'low': [self.candles[i].low for i in range(len(self.candles))],
+                'volume': [self.candles[i].volume for i in range(len(self.candles))]}
 
         self.df = pd.DataFrame(data)
         # Load technical indicator parameters
-        self.ema = sorted(ema)
+        self.ema = ema
         self.macd = macd
         self.rsi = rsi
         # for parabolic SAR, keep track of the extreme value
         self._ep = self.df.loc[0, "high"]
         self._sar: List[float] = [self.df.loc[0, "low"]]
-        self._af_step = 0.02
+        self._af_step = af_step
         self._af_init = self._af = af
         self._af_max = af_max
         self._trend = "up"  # intialize as a up trend
         
         self.client.running_startegies.add(self)
+        self.client.new_subscribe(symbol, 'aggTrade')
+        print('Strategy added succesfully.')
 
     def _update_candles(self, price: float, volume: float, timestamp: int) -> str:
         """
@@ -66,15 +74,14 @@ class Strategy:
         size: Last transaction quantity
         timestamp: the time of the last transaction in ns
         """
-        last_candle = self.df.iloc[-1]
         # Check if the last trade belongs to the last candle
-        if timestamp < last_candle.timestamp + self.timeframe:
-            last_candle.close = price
-            last_candle.volume += volume
-            if price > last_candle.high:
-                last_candle.high = price
-            elif price < last_candle.low:
-                last_candle.low = price
+        if timestamp < self.df.iloc[-1].timestamp + self.timeframe:
+            self.df.iloc[-1].close = price
+            self.df.iloc[-1].volume += volume
+            if price > self.df.iloc[-1].high:
+                self.df.iloc[-1].high = price
+            elif price < self.df.iloc[-1].low:
+                self.df.iloc[-1].low = price
             return "same candle"
 
         # For new candle, there might be some missing candles
@@ -114,12 +121,12 @@ class Strategy:
         """
         self._update_candles(price, volume, timestamp)
         
-        ema_check = 3 * int(self._EMA(self.ema[0]) > self._EMA(self.ema[1]))
+        ema_check = 3 * int(self._EMA(self.ema['slow']) < self._EMA(self.ema['fast']))
 
         macd, macd_signal = self._MACD()
         rsi = self._RSI()
-        _ = self._parabolic_sar()        
-        confidence = ema_check + self.macd_eval(macd, macd_signal) + self.RSI_eval(rsi) + self.sar_eval(self._trend)
+        _ = self._parabolic_sar()
+        confidence = ema_check + self.macd_eval(macd, macd_signal) + self.RSI_eval(rsi.iloc[-1]) + self.sar_eval(self._trend)
 
         if confidence >= 7:
             return 'buy or hodl'
@@ -132,10 +139,10 @@ class Strategy:
         return self.df["close"].ewm(span=window, ignore_na=True).mean().iloc[-1]
 
     def _MACD(self) -> Tuple[float, float]:
-        macd_short = self._EMA(self.macd["short"])
-        macd_long = self._EMA(self.macd["long"])
+        slow_macd = self._EMA(self.macd["slow"])
+        fast_macd = self._EMA(self.macd["fast"])
         macd_signal = self._EMA(self.macd["signal"])
-        return macd_short - macd_long, macd_signal
+        return slow_macd - fast_macd, macd_signal
 
     def _RSI(self) -> float:
         df = self.df.copy()
@@ -181,7 +188,7 @@ class Strategy:
                             # Trend continue
                             self._ep = high
                             self._af = min(self._af + self._af_step, self._af_max)
-                        sar = self._sar[-1] + self._af * (self._ep - self.sar[-1])
+                        sar = self._sar[-1] + self._af * (self._ep - self._sar[-1])
                         sar = min(sar, low)
 
                 elif self._trend == "down":
@@ -205,7 +212,7 @@ class Strategy:
             return sar
     
     @classmethod
-    def RSI_eval(rsi: float) -> int:
+    def RSI_eval(cls, rsi: float) -> int:
         if rsi >= 90:
             return 3
         elif rsi >= 80:
@@ -218,7 +225,7 @@ class Strategy:
             return -1
 
     @classmethod
-    def macd_eval(macd: float, macd_signal: float) -> int:
+    def macd_eval(cls, macd: float, macd_signal: float) -> int:
         if macd > macd_signal:
             if macd_signal > 0:
                 return 3
@@ -233,5 +240,5 @@ class Strategy:
                 return -1
 
     @classmethod
-    def sar_eval(trend: str) -> int:
+    def sar_eval(cls, trend: str) -> int:
         return 3 if trend == "up" else 0
