@@ -1,35 +1,90 @@
 from typing import *
 import pandas as pd
-import plotly.express as px
-import dash
-from dash import html, dcc, dash_table
+from dash import dcc, dash_table
 import dash_bootstrap_components as dbc
 from Moduls.data_modul import *
+from strategies import intervals_to_sec
+
+def get_contracts(exchanges: Dict[str, Dict[str, Contract]]) -> Dict[str, Contract]:
+    for exchange in exchanges.keys():
+        contracts = {f"{exchange} {symbol}": contract
+                     for symbol, contract in exchanges[exchange].items()}
+    return contracts
+
 
 def contracts_layout(exchanges: Dict[str, Dict[str, Contract]]):
+    contracts = get_contracts(exchanges)
     
-    exchanges_dropdown = dbc.Checklist(options=list(exchanges.keys()),
-                                       value=list(exchanges.keys()),
-                                       className='col-auto',
-                                       id='exchanges_dropdown')
-    exchages_dropdown = dbc.Col([html.Label('Exchanges', className='col-auto'),
-                                 exchanges_dropdown], className='col-3')
+    contracts_dropdown = dbc.Col([
+        dcc.Dropdown(options=list(contracts.keys()),
+                     multi=False,
+                     placeholder="Select Contract to track",
+                     id="contracts_dropdown")])
 
-    for exchange in exchanges.keys():
-        contracts = {f"{exchange} {symbol}": contract 
-                             for symbol, contract in exchanges[exchange].items()}
-        
-    contracts_dropdown = dbc.Col([dcc.Dropdown(options=list(contracts.keys()),
-                                               multi=False, placeholder='Select Contract to track',
-                                               id='contracts_dropdown')])
-    columns = ['symbol', 'exchange', 'bidPrice', 'askPrice']
-    data = pd.DataFrame(index=['id'], columns=columns)
-    table = dash_table.DataTable(data=data.to_dict('records'),
-                                 columns=[{"name": i, "id": i} for i in data.columns],                       
-                                 fixed_rows={'headers': True}, page_size=20,
-                                 style_table={'height': '300px', 'overflowY': 'auto'},
-                                 id='ws_table', row_deletable=True)
+    columns = ["symbol", "exchange", "bidPrice", "askPrice"]
+    data = pd.DataFrame(index=["id"], columns=columns)
     
-    header = dbc.Row([exchages_dropdown, contracts_dropdown], class_name='container-fluid, mt-3')
+    table = dash_table.DataTable(data=data.to_dict("records"),
+                                 columns=[{"name": i, "id": i} for i in data.columns],
+                                 fixed_rows={"headers": True}, page_size=20,
+                                 style_table={"height": "300px", "overflowY": "auto"},
+                                 id="ws_table", row_deletable=True)
+
+    header = dbc.Container(contracts_dropdown, class_name="container-fluid, mt-3 mb-3")
+
+    return dbc.Row(dbc.Container([header, table], class_name="col-6"))
+
+
+def percentage_container(labels: Set[str], max_=None):
+    containers = [[dbc.Label(f'{label} %'), 
+                  dbc.Input(value=10, type='number',
+                            min=1, max=max_, step=1,
+                            id=label.replace(' ', '_').lower())]
+                 for label in labels]
     
-    return dbc.Row(dbc.Container([header, table], class_name='container-fluid col-6'))
+    
+    pct_container = dbc.Col(dbc.Row([dbc.Col(container, width=12//len(containers)) 
+                                     for container in containers]),
+                            width=len(containers))
+    return pct_container
+
+
+def technical_container(name: str, types: List):
+    indicator_labels = [dbc.Col(f"{label[0].capitalize()}") for label in types]
+    indicator_inputs = [dbc.Col(dbc.Input(type='number', id=f'{label[0]}_{name.lower()}', 
+                                          value=label[1], min=1)) 
+                        for label in types]
+    
+    indicator_container = dbc.Col([dbc.Label(f'{name}'),
+                                   dbc.Row(indicator_labels),
+                                   dbc.Row(indicator_inputs)],
+                                  width = len(types),
+                                  class_name='border border-secondary m-3')
+    return indicator_container
+
+
+def strategy_layout(exchanges: Dict[str, Dict[str, Contract]]):
+    contracts = get_contracts(exchanges)
+    contracts_dropdown = dbc.Col([dbc.Label('Trading Pair'),
+                                  dcc.Dropdown(options=list(contracts.keys()),
+                                               multi=False, placeholder="contracts",
+                                               id="strategy_contracts_dropdown")],
+                                 class_name='align-items-center', width=2)
+    
+    entry_box = dbc.Row([contracts_dropdown, 
+                        percentage_container({'TP', 'SL'}), 
+                        percentage_container({'Buy'})],
+                       className='align-items-center text-center')
+    
+    technical_box = dbc.Row([technical_container('EMA', [['fast', 7], ['slow', 25]]),
+                             technical_container('MACD', [['fast', 12], ['slow', 26], ['signal', 9]])],
+                            className='align-items-center text-center')
+    
+    button = dbc.Button('Run Strategy', id='run_strategy', class_name='btn btn-primary')
+    
+    intervals_container = dcc.Dropdown(options=list(intervals_to_sec.keys()),
+                                       multi=False,
+                                       placeholder="Select trading interval",
+                                       id="interval_dropdown")
+    
+    return dbc.Container([entry_box, technical_box, intervals_container, button])
