@@ -22,6 +22,16 @@ load_dotenv()
 
 
 class BinanceClient:
+    _loaded = {}
+    
+    def __new__(cls, is_spot: bool, is_test: bool):
+        if (client := cls._loaded.get(f"{is_spot} {is_test}")) is None:
+            client = super().__new__(cls)
+            cls._loaded[f"{is_spot} {is_test}"] = client
+            
+        return client
+        
+    
     def __init__(self, is_spot: bool, is_test: bool):
         self.exchange = "Binance"
         
@@ -267,7 +277,7 @@ class BinanceClient:
                 """
                 trade_price = float(data['p'])
                 volume = float(data['q'])
-                timestamp = int(data['t'])
+                timestamp = int(data['T'])
                 
                 for strategy in self.running_startegies:
                     if strategy.is_running:
@@ -353,7 +363,7 @@ class BinanceClient:
                 self.running_startegies.pop(strategy)
 
     def _process_dicision(self, strategy: 'Strategy', decision: str, latest_price: float):
-        if 'buy' in decision.lower and not strategy.had_assits:
+        if 'buy' in decision and not strategy.had_assits:
             # Binance don't allow less than 10$ transaction
             min_qty_margin = max(10/latest_price, strategy.contract.minQuantity)
             base_asset = strategy.contract.quoteAsset # USDT or BUSD, etc..
