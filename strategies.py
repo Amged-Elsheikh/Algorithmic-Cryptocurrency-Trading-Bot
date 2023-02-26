@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from typing import *
 
 import numpy as np
@@ -17,11 +18,10 @@ d = 24 * h
 intervals_to_sec = { "1m": m, "15m": 15 * m, "30m": 30 * m, 
                     "1h": h, "2h": 2 * h, "4h": 4 * h, "8h": 8 * h,
                     "12h": 12 * h, "1d": d, "2d": 2 * d}
-class Strategy:
+class Strategy(ABC):
 
     def __init__(self, client: 'BinanceClient', symbol: str, interval: str,
-                 ema: Dict[str, int], macd: Dict[str, int], tp: float, sl: float,
-                 buy_pct: float, af=0.02, af_max=0.2, af_step=0.02, rsi=12):
+                 tp: float, sl: float, buy_pct: float):
         # running_strategies variable is a dictionary where the key is the symbol and the values is another
         self.client = client
         if self.client.exchange=='Binance':
@@ -47,22 +47,7 @@ class Strategy:
                 'high': [self.candles[i].high for i in range(len(self.candles))],
                 'low': [self.candles[i].low for i in range(len(self.candles))],
                 'volume': [self.candles[i].volume for i in range(len(self.candles))]}
-
         self.df = pd.DataFrame(data)
-        # Load technical indicator parameters
-        self.ema = ema
-        self.macd = macd
-        self.rsi = rsi
-        # for parabolic SAR, keep track of the extreme value
-        self._ep = self.df.loc[0, "high"]
-        self._sar: List[float] = []
-        self._af_step = af_step
-        self._af_init = self._af = af
-        self._af_max = af_max
-        self._SAR()
-        self.client.running_startegies.add(self)
-        self.client.new_subscribe(symbol, 'aggTrade')
-        print('Strategy added succesfully.')
 
     def _update_candles(self, price: float, volume: float, timestamp: int) -> str:
         """
@@ -99,35 +84,49 @@ class Strategy:
             self.df.loc[len(self.df), :] = [open_time, price, price,
                                             price, price, volume]
             return 'New candle'
-
+    
+    @abstractmethod
+    def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
+        pass
+class TechnicalStrategies(Strategy):
+    def __init__(self, client: 'BinanceClient', symbol: str, interval: str,
+                 tp: float, sl: float, buy_pct: float, ema: Dict[str, int],
+                 macd: Dict[str, int], af=0.02, af_max=0.2, af_step=0.02, rsi=12):
+        
+        super().__init__(client, symbol, interval, tp, sl, buy_pct)
+        # Load technical indicator parameters
+        self.ema = ema
+        self.macd = macd
+        self.rsi = rsi
+        # for parabolic SAR, keep track of the extreme value
+        self._ep = self.df.loc[0, "high"]
+        self._sar: List[float] = []
+        self._af_step = af_step
+        self._af_init = self._af = af
+        self._af_max = af_max
+        self._SAR()
+        self.client.running_startegies.add(self)
+        self.client.new_subscribe(symbol, 'aggTrade')
+        print('Strategy added succesfully.')
+        
     def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
         """
         This function will keep updating the technical indicators values and trade if needed
         """
         candle = self._update_candles(price, volume, timestamp)
-        ema_fast =self._EMA(self.ema['fast']).iloc[-1]
-        ema_slow =self._EMA(self.ema['slow']).iloc[-1]
+        ema_fast = self._EMA(self.ema['fast']).iloc[-1]
+        ema_slow = self._EMA(self.ema['slow']).iloc[-1]
         ema_check = 3 * int(ema_fast > ema_slow)
 
         macd, macd_signal = self._MACD()
         rsi = self._RSI()
         if candle == 'New candle':
             self._SAR()
-        confidence = ema_check + self.macd_eval(macd, macd_signal) + self.RSI_eval(rsi) + 3 * int(self._upTrend)
-        print(f"""
-              **********************************************
-              EMA fast: {np.round(ema_fast, 2)}
-              EMA slow: {np.round(ema_slow, 2)}
-              MACD: {np.round(macd, 2)}
-              MACD Siganl: {np.round(macd_signal, 2)}
-              RSI: {rsi}
-              SAR: {self._sar[-1]}
-              Uptrend: {self._upTrend}""")
+        confidence = ema_check + self._macd_eval(macd, macd_signal) + self._RSI_eval(rsi) + 3 * int(self._upTrend)
+        
         if confidence >= 7:
             return 'buy or hodl'
         elif confidence >= 4:
-            return 'hodl'
-        else:
             return "sell or don't enter"
 
     def _EMA(self, window: int) -> pd.Series:
@@ -215,21 +214,21 @@ class Strategy:
         self._sar.append(sar)
         return
     
-    @classmethod
-    def RSI_eval(cls, rsi: float) -> int:
+    def _RSI_eval(self, rsi: float) -> int:
         if rsi >= 70:
             return 3
-        elif rsi >= 55:
+        elif rsi >= 60:
             return 2
-        elif rsi >= 40:
+        elif rsi >= 50:
             return 1
-        elif rsi > 30:
+        elif rsi >= 40:
             return 0
-        else:
+        elif rsi >= 30:
             return -1
+        else:
+            return -10
 
-    @classmethod
-    def macd_eval(cls, macd: float, macd_signal: float) -> int:
+    def _macd_eval(self, macd: float, macd_signal: float) -> int:
         if macd > macd_signal:
             if macd_signal > 0:
                 return 3
@@ -238,14 +237,10 @@ class Strategy:
             else:
                 return 1
         else:
-            if macd_signal < 0 or macd < 0:
-                return -2
+            if macd_signal < 0:
+                return -3
             else:
-                return -1
-
-    @classmethod
-    def sar_eval(cls, trend: str) -> int:
-        return 3 if trend == "up" else 0
+                return -2
     
     @property
     def _downTrend(self):
@@ -254,3 +249,4 @@ class Strategy:
     @_downTrend.setter
     def _downTrend(self, value: bool):
         self._upTrend = not value
+        
