@@ -30,7 +30,6 @@ class BinanceClient:
         if (client := cls._loaded.get(f"{is_spot} {is_test}")) is None:
             client = super().__new__(cls)
             cls._loaded[f"{is_spot} {is_test}"] = client
-            
         return client
         
     def __init__(self, is_spot: bool, is_test: bool):
@@ -62,10 +61,7 @@ class BinanceClient:
         Once counter reach Zero, unsubscribe the aggTrade channel. The first key is the symbol, and the item is another dictionary.
         For the 2nd dict, the keys are the counter 'count' and the 'id' for the web socket
         """
-        self._reconnect = True
-        t = Thread(target=self._start_ws)
-        t.start()
-
+        
     def _init(self, is_spot: bool, is_test: bool):
         # Spot Trading
         # Test Net
@@ -88,7 +84,12 @@ class BinanceClient:
             self._ws_url = 'wss://fstream.binance.com/ws'
             
         self._api_key = f"Binance{'Spot' if is_spot else 'Future'}{'Test' if is_test else ''}APIKey"
-        self._api_secret = self._api_key.replace('APIKey', 'APISecret')     
+        self._api_secret = self._api_key.replace('APIKey', 'APISecret')
+        
+    def run(self):
+        self._reconnect = True
+        t = Thread(target=self._start_ws)
+        t.start()
         
     @property
     def _is_connected(self):
@@ -225,8 +226,8 @@ class BinanceClient:
     ############################ Websocket Arguments ############################
     def _start_ws(self):
         self._ws = websocket.WebSocketApp(self._ws_url, 
-                                         on_open=self._on_open, on_close=self._on_close,
-                                         on_error=self._on_error, on_message=self._on_message)
+                                          on_open=self._on_open, on_close=self._on_close,
+                                          on_error=self._on_error, on_message=self._on_message)
         # Reopen the websocket connection if it terminated
         while True:
             try:
@@ -259,42 +260,10 @@ class BinanceClient:
         if "e" in data.keys():
             symbol = data["s"]
             if data["e"] == "bookTicker":
-                """
-                bookTicker message is pushed when either one of the bid or ask changes.
-                Used to track a trading pairs and calculate unrealized PnL.
-                
-                Subscribe to the bookTicker to track a contract pair, or when starting new strategy.
-                """
-                # Update ask/bid prices
-                self.prices[symbol].bid = data["b"]
-                self.prices[symbol].ask = data["a"]
-                
-                for strategy in self.running_startegies:
-                    if symbol == strategy.contract.symbol and strategy.had_assits:
-                        # Calculate the uPnL only when an order is made
-                        self._check_tp_sl(strategy)
+                self._bookTickerMsg(data, symbol)
             
             elif data["e"] == "aggTrade":
-                """
-                AggTrade message is send when a trade is made.
-                Used to update indicators and make trading decision.
-                 
-                Subscribe to this channel when starting new strategy, and cancel the subscribtion once
-                all running strategies for a given contract stopped.
-                """
-                trade_price = float(data['p'])
-                volume = float(data['q'])
-                timestamp = int(data['T'])
-                
-                for strategy in self.running_startegies:
-                    if strategy.is_running:
-                        if symbol==strategy.contract.symbol:
-                            decision = strategy.parse_trade(trade_price, 
-                                                            volume, timestamp)
-                            self._process_dicision(strategy, decision,
-                                                   latest_price=trade_price)
-                    else:
-                        self.unsubscribe_channel(symbol, 'aggTrade', strategy)
+                self._aggTradeMsg(data, symbol)
 
     def new_subscribe(self, symbol="BTCUSDT", channel="bookTicker"):
         params = f"{symbol.lower()}@{channel}"
@@ -345,32 +314,68 @@ class BinanceClient:
                 self.running_startegies.pop(strategy)
 
     ############################ Strategy Arguments ############################
+    def _bookTickerMsg(self, data, symbol):
+        """
+        bookTicker message is pushed when either one of the bid or ask changes.
+        Used to track a trading pairs and calculate unrealized PnL.
+        
+        Subscribe to the bookTicker to track a contract pair, or when starting new strategy.
+        """
+        # Update ask/bid prices
+        self.prices[symbol].bid = float(data["b"])
+        self.prices[symbol].ask = float(data["a"])
+                
+        for strategy in self.running_startegies:
+            if symbol == strategy.contract.symbol and strategy.had_assits:
+                # Calculate the uPnL only when an order is made
+                self._check_tp_sl(strategy)
+        return
+    
     def _check_tp_sl(self, strategy: 'Strategy'):
         buying_price = strategy.order.price
         unrealizedPnl = (1 - self.prices[strategy.contract.symbol].ask / buying_price) * 100
         # Take Profit or Stop Loss check
-        if unrealizedPnl >= strategy.tp:
-            self._take_profit(strategy)
-        elif unrealizedPnl <= -1 * strategy.sl:
-            self._stop_loss(strategy)
+        if unrealizedPnl >= strategy.tp or unrealizedPnl <= -1 * strategy.sl:
+            self._sell_strategy_asset(strategy)
+        return
 
-    def _stop_loss(self, strategy: 'Strategy'):
+    def _sell_strategy_asset(self, strategy):
         sell_order = self._make_order(self.contracts[strategy.contract.symbol], 'SELL',
                                       order_type='MARKET', quantity=strategy.order.quantity)
         if sell_order:
-            strategy.had_assits = False
-            strategy.relaizedPnL -= (strategy.order.quantity * strategy.order.price)\
-                - (sell_order.quantity * sell_order.price)
-            self.order = sell_order
-            
-    def _take_profit(self, strategy: 'Strategy'):
-        sell_order = self._make_order(self.contracts[strategy.contract.symbol], 'SELL',
-                                      order_type='MARKET', quantity=strategy.order.quantity/2)
-        if sell_order:
-            strategy.relaizedPnL += (sell_order.quantity * sell_order.price)\
-                - (strategy.order.quantity * strategy.order.price)
             strategy.order = sell_order
-            
+            strategy.relaizedPnL += self._PnLcalciator(strategy, sell_order)
+            strategy.had_assits = False
+        return
+    
+    def _PnLcalciator(self, strategy: 'Strategy', sell_order: Order) ->float:
+        sell_margin = sell_order.quantity * sell_order.price
+        buy_margin = strategy.order.quantity * strategy.order.price
+        return sell_margin - buy_margin
+    
+    def _aggTradeMsg(self, data, symbol):
+        """
+        AggTrade message is send when a trade is made.
+        Used to update indicators and make trading decision.
+        
+        Subscribe to this channel when starting new strategy, and cancel the subscribtion once
+        all running strategies for a given contract stopped.
+        """
+        trade_price = float(data['p'])
+        volume = float(data['q'])
+        timestamp = int(data['T'])
+                
+        for strategy in self.running_startegies:
+            if strategy.is_running:
+                if symbol==strategy.contract.symbol:
+                    decision = strategy.parse_trade(trade_price, 
+                                                    volume, timestamp)
+                    self._process_dicision(strategy, decision,
+                                           latest_price=trade_price)
+            else:
+                self.unsubscribe_channel(symbol, 'aggTrade', strategy)
+        return
+          
     def _process_dicision(self, strategy: 'Strategy', decision: str, latest_price: float):
         if 'buy' in decision and not strategy.had_assits:
             # Binance don't allow less than 10$ transaction
@@ -402,10 +407,6 @@ class BinanceClient:
         
         elif 'sell' in decision.lower() and strategy.had_assits:
                 # If there is an existing order and indicators are not good, SELL
-                sell_order = self._make_order(strategy.contract, order_side='SELL',
-                                              quantity=strategy.order.quantity,
-                                              order_type='MARKET',)
-                if sell_order:
-                    strategy.relaizedPnL -= (strategy.order.quantity * strategy.order.price) - (sell_order.quantity * sell_order.price)
-                    strategy.order = sell_order
-                    strategy.had_assits = False
+                self._sell_strategy_asset(strategy)
+        return
+    
