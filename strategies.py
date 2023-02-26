@@ -107,7 +107,7 @@ class TechnicalStrategies(Strategy):
         self._SAR()
         self.client.running_startegies.add(self)
         self.client.new_subscribe(symbol, 'aggTrade')
-        print('Strategy added succesfully.')
+        self.client.logger.info('Strategy added succesfully.')
         
     def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
         """
