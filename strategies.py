@@ -21,7 +21,7 @@ class Strategy:
 
     def __init__(self, client: 'BinanceClient', symbol: str, interval: str,
                  ema: Dict[str, int], macd: Dict[str, int], tp: float, sl: float,
-                 buy_pct: float, af=0.02, af_max=0.2, af_step=0.02, rsi=24):
+                 buy_pct: float, af=0.02, af_max=0.2, af_step=0.02, rsi=12):
         # running_strategies variable is a dictionary where the key is the symbol and the values is another
         self.client = client
         if self.client.exchange=='Binance':
@@ -31,7 +31,7 @@ class Strategy:
         self.contract = self.client.contracts[symbol]
         self.timeframe = intervals_to_sec[interval] * 1000
         
-        candles = self.candles = self.client.get_candlestick(self.contract, interval)
+        self.candles = self.client.get_candlestick(self.contract, interval)
         self.order: List[Order] = []
         self.had_assits = False
         self.is_running = True
@@ -41,9 +41,6 @@ class Strategy:
         self.tp = tp # Take profit
         self.sl = sl # Stop Loss
         self.buy_pct = buy_pct # The percentage of available balance to use for the trade
-
-        columns = ["timestamp", "open", "close", "high", "low", "volume"]
-        
         data = {'timestamp': [self.candles[i].timestamp for i in range(len(self.candles))],
                 'open': [self.candles[i].open for i in range(len(self.candles))],
                 'close': [self.candles[i].close for i in range(len(self.candles))],
@@ -58,12 +55,11 @@ class Strategy:
         self.rsi = rsi
         # for parabolic SAR, keep track of the extreme value
         self._ep = self.df.loc[0, "high"]
-        self._sar: List[float] = [self.df.loc[0, "low"]]
+        self._sar: List[float] = []
         self._af_step = af_step
         self._af_init = self._af = af
         self._af_max = af_max
-        self._trend = "up"  # intialize as a up trend
-        
+        self._SAR()
         self.client.running_startegies.add(self)
         self.client.new_subscribe(symbol, 'aggTrade')
         print('Strategy added succesfully.')
@@ -74,152 +70,160 @@ class Strategy:
         size: Last transaction quantity
         timestamp: the time of the last transaction in ns
         """
+        n = len(self.df) - 1
         # Check if the last trade belongs to the last candle
-        if timestamp < self.df.iloc[-1].timestamp + self.timeframe:
-            self.df.iloc[-1].close = price
-            self.df.iloc[-1].volume += volume
-            if price > self.df.iloc[-1].high:
-                self.df.iloc[-1].high = price
-            elif price < self.df.iloc[-1].low:
-                self.df.iloc[-1].low = price
-            return "same candle"
-
+        if timestamp < self.df.loc[n, 'timestamp'] + self.timeframe:
+            self.df.loc[n, 'close'] = price
+            self.df.loc[n, 'volume'] += volume
+            if price > self.df.loc[n, 'high']:
+                self.df.loc[n, 'high'] = price
+            elif price < self.df.loc[n, 'low']:
+                self.df.loc[n, 'low'] = price
+            return 'Same candle'
         # For new candle, there might be some missing candles
         else:
+            last_candle = self.df.loc[n]
             # Account for missing candles
-            missing_candles = (timestamp - last_candle.timestamp) // self.timeframe - 1
+            missing_candles = int((timestamp - last_candle.timestamp) / self.timeframe - 1)
             # If there are any missing candles, create them
             for _ in range(missing_candles):
-                last_candle = self.df.iloc[-1]
                 open_time = last_candle.timestamp + self.timeframe
                 open_ = close = high = low = np.nan
                 volume = 0
-                self.df.loc[len(self.df), :] = [
-                    open_time,
-                    open_,
-                    close,
-                    high,
-                    low,
-                    volume,
-                ]
-
-            last_candle = self.df.iloc[-1]
+                self.df.loc[len(self.df), :] = [open_time, open_, close,
+                                                high, low, volume]
+                last_candle = self.df.loc[n]
+            # Update the last candle
+            last_candle = self.df.loc[n]
             open_time = last_candle.timestamp + self.timeframe
-            self.df.loc[len(self.df), :] = [
-                open_time,
-                price,
-                price,
-                price,
-                price,
-                volume,
-            ]
-            return "new candle"
+            self.df.loc[len(self.df), :] = [open_time, price, price,
+                                            price, price, volume]
+            return 'New candle'
 
     def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
         """
         This function will keep updating the technical indicators values and trade if needed
         """
-        self._update_candles(price, volume, timestamp)
-        
-        ema_check = 3 * int(self._EMA(self.ema['slow']) < self._EMA(self.ema['fast']))
+        candle = self._update_candles(price, volume, timestamp)
+        ema_fast =self._EMA(self.ema['fast']).iloc[-1]
+        ema_slow =self._EMA(self.ema['slow']).iloc[-1]
+        ema_check = 3 * int(ema_fast > ema_slow)
 
         macd, macd_signal = self._MACD()
         rsi = self._RSI()
-        _ = self._parabolic_sar()
-        confidence = ema_check + self.macd_eval(macd, macd_signal) + self.RSI_eval(rsi.iloc[-1]) + self.sar_eval(self._trend)
-
+        if candle == 'New candle':
+            self._SAR()
+        confidence = ema_check + self.macd_eval(macd, macd_signal) + self.RSI_eval(rsi) + 3 * int(self._upTrend)
+        print(f"""
+              **********************************************
+              EMA fast: {np.round(ema_fast, 2)}
+              EMA slow: {np.round(ema_slow, 2)}
+              MACD: {np.round(macd, 2)}
+              MACD Siganl: {np.round(macd_signal, 2)}
+              RSI: {rsi}
+              SAR: {self._sar[-1]}
+              Uptrend: {self._upTrend}""")
         if confidence >= 7:
             return 'buy or hodl'
-        elif confidence >= 5:
+        elif confidence >= 4:
             return 'hodl'
         else:
-            "sell or don't enter"
+            return "sell or don't enter"
 
-    def _EMA(self, window: int) -> float:
-        return self.df["close"].ewm(span=window, ignore_na=True).mean().iloc[-1]
+    def _EMA(self, window: int) -> pd.Series:
+        return self.df["close"].ewm(span=window).mean()
 
     def _MACD(self) -> Tuple[float, float]:
         slow_macd = self._EMA(self.macd["slow"])
         fast_macd = self._EMA(self.macd["fast"])
-        macd_signal = self._EMA(self.macd["signal"])
-        return slow_macd - fast_macd, macd_signal
+        macd = fast_macd - slow_macd
+        macd_signal = macd.ewm(span=self.macd["signal"]).mean()
+        macd_signal = macd - macd_signal
+        return macd.iloc[-1], macd_signal.iloc[-1]
 
     def _RSI(self) -> float:
-        df = self.df.copy()
+        diff = self.df["close"].diff()
+        up = diff.where(diff > 0, 0)
+        down = diff.where(diff < 0, 0)
+        down *= -1
+        gain = up.ewm(span = self.rsi, min_periods = self.rsi).mean().iloc[-1]
+        loss = down.ewm(span = self.rsi, min_periods = self.rsi).mean().iloc[-1]
+        rsi = 100 if loss == 0 else 100 - (100 / (1 + (gain / loss)))
+        return np.round(rsi, 2)
+    
+    def _SAR(self):
+        if not self._sar:
+            self._calculate_first_sar()
+            
+        low = self.df.loc[:, 'low'].iloc[-1]
+        high = self.df.loc[:, 'high'].iloc[-1]
+        sar = self._sar[-1]
         
-        df['diff'] = df["close"].diff()
-        
-        df['up'] = np.where(df['diff'] > 0, df['diff'], 0)
-        df['down'] = np.where(df['diff'] < 0, abs(df['diff']), 0)
-        
-        gain = df['up'].rolling(self.rsi).mean()
-        loss = df['down'].rolling(self.rsi).mean()
-        
-        rs = gain / loss
-        # Calculate the RSI
-        rsi = 100 - (100 / (1 + rs))
-        return rsi
-
-    def _parabolic_sar(self, calc_all=False) -> float:
-        """
-        https://raposa.trade/blog/the-complete-guide-to-calculating-the-parabolic-sar-in-python/
-        """
-        if calc_all:
-            data = self.df
-        else:
-            data = self.df.iloc[-2:]
-
-        for i in data.index[1:]:
-            low = self.df.loc[i, "low"]
-            high = self.df.loc[i, "high"]
-            if high:  # Make sure there was a trade
-                if self._trend == "up":
-                    if self._sar[-1] > low:
-                        # Trend reverse
-                        self._trend = "down"
-                        self._af = self._af_init
-                        sar = self._ep
-                        self._ep = low
-                        sar = sar - self._af * (sar - self._ep)
-                        sar = max(sar, high)
-
-                    else:
-                        if high > self._ep:
-                            # Trend continue
-                            self._ep = high
-                            self._af = min(self._af + self._af_step, self._af_max)
-                        sar = self._sar[-1] + self._af * (self._ep - self._sar[-1])
-                        sar = min(sar, low)
-
-                elif self._trend == "down":
-                    if high < self._sar[-1]:
-                        # Reversal
-                        self._trend = "up"
-                        self._af = self._af_init
-                        sar = self._ep
-                        self._ep = high
-                        sar = sar + self._af * (self._ep - sar)
-                        sar = min(sar, low)
-                    else:
-                        if low < self._ep:
-                            self._ep = low
-                            self._af = min(self._af + self._af_step, self._af_max)
-                        sar = self._sar[-1] - self._af * (sar - self._ep)
-                        sar = max(sar, high)
+        if self._upTrend:
+            if sar > low:
+                reversal = True
+                self._downTrend = True
+                sar = max(self._ep, high)
+                self._ep = low
+                self._af = self._af_step
             else:
-                sar = self._sar[-1]
-            self._sar.append(sar)
-            return sar
+                reversal = False
+        elif self._downTrend:
+            if sar < high:
+                reversal = True
+                self._upTrend = True
+                sar = min(self._ep, low)
+                self._ep = high
+                self._af = self._af_step
+            else:
+                reversal = False
+        
+        if not reversal:
+            if self._upTrend and high > self._ep:
+                self._ep = high
+                self._af = min(self._af_max, self._af + self._af_step)
+            elif self._downTrend and low < self._ep:
+                self._ep = low
+                self._af = min(self._af_max, self._af + self._af_step)
+        
+        if self._upTrend:
+            sar = min(sar, min(self.df.loc[:, 'low'].iloc[-3:-1]))
+        elif self._downTrend:
+            sar = max(sar, max(self.df.loc[:, 'high'].iloc[-3:-1]))
+            
+        sar += self._af * (self._ep - sar)
+        self._sar.append(sar)
+        return
+    
+    def _calculate_first_sar(self):
+        prev_low = self.df.loc[:, 'low'].iloc[-2]
+        prev_high = self.df.loc[:, 'high'].iloc[-2]
+        prev_close = self.df.loc[:, 'close'].iloc[-2]
+        curr_low = self.df.loc[:, 'low'].iloc[-1]
+        curr_high = self.df.loc[:, 'high'].iloc[-1]
+        curr_close = self.df.loc[:, 'close'].iloc[-1]
+        if curr_close > prev_close:
+            self._upTrend = True
+            self._ep = curr_high
+            sar = prev_low
+        else:
+            self._downTrend = True
+            self._ep = curr_low
+            sar = prev_high
+            
+        sar = sar + self._af_init * (self._ep - sar)
+        self._sar.append(sar)
+        return
     
     @classmethod
     def RSI_eval(cls, rsi: float) -> int:
-        if rsi >= 90:
+        if rsi >= 70:
             return 3
-        elif rsi >= 80:
+        elif rsi >= 55:
             return 2
-        elif rsi >= 65:
+        elif rsi >= 40:
             return 1
-        elif rsi > 50:
+        elif rsi > 30:
             return 0
         else:
             return -1
@@ -242,3 +246,11 @@ class Strategy:
     @classmethod
     def sar_eval(cls, trend: str) -> int:
         return 3 if trend == "up" else 0
+    
+    @property
+    def _downTrend(self):
+        return not self._upTrend
+    
+    @_downTrend.setter
+    def _downTrend(self, value: bool):
+        self._upTrend = not value
