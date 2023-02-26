@@ -13,7 +13,7 @@ from strategies import intervals_to_sec
 def get_contracts(clients: Dict[str, 'BinanceClient']) -> Dict[str, Contract]:
     for client in clients:
         contracts = {f"{client}: {symbol}": contract
-                     for symbol, contract in clients[client].contracts.items()}
+                     for symbol, contract in clients[client].items()}
     return contracts
 
 
