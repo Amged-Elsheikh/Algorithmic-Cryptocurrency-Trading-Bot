@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import logging.config
 import os
 import time
 from collections import defaultdict
@@ -40,7 +41,8 @@ class BinanceClient:
         self._http_dict = {"GET": requests.get,
                            "POST": requests.post,
                            "DELETE": requests.delete}
-        self.logger = logging.getLogger("log_module")
+        logging.config.fileConfig("logger.config")
+        self.logger = logging.getLogger(__name__)
 
         # Check internet connection
         self._check_internet_connection()
@@ -128,9 +130,9 @@ class BinanceClient:
             response.raise_for_status()
             return response
         except RequestException as e:
-            print(f"Request error {e}")
+            self.logger.warning(f"Request error {e}")
         except Exception as e:
-            print(f"Error: {e}")
+            self.logger.error(f"Error: {e}")
         return None
 
     def _generate_signature(self, query_string: str):
@@ -220,7 +222,7 @@ class BinanceClient:
 
     @balance.setter
     def balance(self, *args, **kwargs):
-        print("Balance can't be edited manually")
+        self.logger.warning("Balance can't be edited manually")
         return self.balance
 
     ############################ Websocket Arguments ############################
@@ -238,19 +240,19 @@ class BinanceClient:
                     break
             except Exception as e:
                 # Update the log about this error
-                print("Binance error in run_forever() method: %s", e)
+                self.logger.warning("Binance error in run_forever() method: %s", e)
             # Add sleeping interval
             time.sleep(3)
 
     def _on_open(self, ws: websocket.WebSocketApp):
-        print("Websocket connected")
+        self.logger.info("Websocket connected")
                 
     def _on_error(self, ws: websocket.WebSocketApp, error):
-        print(f"Error: {error}")
+        self.logger.error(f"Error: {error}")
 
     def _on_close(self, ws: websocket.WebSocketApp):
         self._reconnect = False
-        print("Websoccet disconnect")
+        self.logger.info("Websoccet disconnect")
         
     def _on_message(self, ws: websocket.WebSocketApp, msg):
         """This is the argument that will form most of the connections between the backend and frontend 
@@ -269,7 +271,7 @@ class BinanceClient:
         params = f"{symbol.lower()}@{channel}"
         if channel == "bookTicker":
             if self.contracts[symbol] in self.bookTicker_subscribtion_list:
-                print(f"Already subscribed to {params} channel")
+                self.logger.info(f"Already subscribed to {params} channel")
             else:
                 msg = {"method": "SUBSCRIBE", "params": [params], "id": self.id}
                 # immediatly show current bid and ask prices.
@@ -284,7 +286,7 @@ class BinanceClient:
             if self.contracts[symbol] not in self.bookTicker_subscribtion_list:
                 self.new_subscribe(symbol, "bookTicker")
             if symbol in self.strategy_counter.keys():
-                print(f"Already subscribed to {params} channel")
+                self.logger.info(f"Already subscribed to {params} channel")
             else:
                 msg = {"method": "SUBSCRIBE", "params": [params], "id": self.id}
                 # Subscribe to the websocket channel
@@ -397,13 +399,13 @@ class BinanceClient:
                 if order:
                     strategy.order = order
                     strategy.had_assits = True
-                    print(f"""
+                    self.logger.info(f"""
                           {strategy.order.symbol} buying order was made.
                           Quantity: {strategy.order.quantity}. 
                           Price: {strategy.order.price}
                           """)
             else:
-                print(f"{self.strategy.contract.symbol} buying option could not be made because the ordered quantity is less than the minimum margin")
+                self.logger.info(f"{self.strategy.contract.symbol} buying option could not be made because the ordered quantity is less than the minimum margin")
         
         elif 'sell' in decision.lower() and strategy.had_assits:
                 # If there is an existing order and indicators are not good, SELL
