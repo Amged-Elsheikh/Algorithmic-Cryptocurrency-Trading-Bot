@@ -1,19 +1,24 @@
 from typing import *
-import pandas as pd
-from dash import dcc, dash_table
+
 import dash_bootstrap_components as dbc
+import pandas as pd
+from dash import dash_table, dcc
+
+if TYPE_CHECKING:
+    from Connectors.binance_connectore import BinanceClient
 from Moduls.data_modul import *
 from strategies import intervals_to_sec
 
-def get_contracts(exchanges: Dict[str, Dict[str, Contract]]) -> Dict[str, Contract]:
-    for exchange in exchanges.keys():
-        contracts = {f"{exchange} {symbol}": contract
-                     for symbol, contract in exchanges[exchange].items()}
+
+def get_contracts(clients: Dict[str, 'BinanceClient']) -> Dict[str, Contract]:
+    for client in clients:
+        contracts = {f"{client}: {symbol}": contract
+                     for symbol, contract in clients[client].contracts.items()}
     return contracts
 
 
-def contracts_layout(exchanges: Dict[str, Dict[str, Contract]]):
-    contracts = get_contracts(exchanges)
+def contracts_layout(clients: Dict[str, 'BinanceClient']):
+    contracts = get_contracts(clients)
     
     contracts_dropdown = dbc.Col([
         dcc.Dropdown(options=list(contracts.keys()),
@@ -26,12 +31,11 @@ def contracts_layout(exchanges: Dict[str, Dict[str, Contract]]):
     
     table = dash_table.DataTable(data=data.to_dict("records"),
                                  columns=[{"name": i, "id": i} for i in data.columns],
-                                 fixed_rows={"headers": True}, page_size=20,
                                  style_table={"height": "300px", "overflowY": "auto"},
+                                 fixed_rows={"headers": True}, page_size=20,
                                  id="ws_table", row_deletable=True)
 
     header = dbc.Container(contracts_dropdown, class_name="container-fluid, mt-3 mb-3")
-
     return dbc.Row(dbc.Container([header, table], class_name="col-6"))
 
 
@@ -63,10 +67,11 @@ def technical_container(name: str, types: List):
     return indicator_container
 
 
-def strategy_layout(exchanges: Dict[str, Dict[str, Contract]]):
-    contracts = get_contracts(exchanges)
+def strategy_layout(clients: Dict[str, 'BinanceClient']):
+    contracts = get_contracts(clients)
     contracts_dropdown = dbc.Col([dbc.Label('Trading Pair'),
                                   dcc.Dropdown(options=list(contracts.keys()),
+                                               value='Binance: BTCUSDT',
                                                multi=False, placeholder="contracts",
                                                id="strategy_contracts_dropdown")],
                                  class_name='align-items-center', width=2)
@@ -83,7 +88,7 @@ def strategy_layout(exchanges: Dict[str, Dict[str, Contract]]):
     button = dbc.Button('Run Strategy', id='run_strategy', class_name='btn btn-primary')
     
     intervals_container = dcc.Dropdown(options=list(intervals_to_sec.keys()),
-                                       multi=False,
+                                       multi=False, value='30m',
                                        placeholder="Select trading interval",
                                        id="interval_dropdown")
     

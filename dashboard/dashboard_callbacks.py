@@ -1,11 +1,9 @@
-from typing import *
-import pandas as pd
 import dash
 from dash import Input, Output, State
 import dash_bootstrap_components as dbc
 
 from strategies import Strategy
-from Moduls.data_modul import Contract 
+from Moduls.data_modul import Contract
 from app import clients
 
 @dash.callback(Output(component_id='contracts_dropdown', component_property='value'),
@@ -68,7 +66,7 @@ def start_strategy(n_click, contract: Contract, tp, sl,
     
     macd = {'slow': slow_macd, 'fast': fast_macd, 
             'signal': macd_signal}
-    exchange, symbol = contract.split(' ')
+    exchange, symbol = contract.split(': ')
     
     Strategy(clients[exchange], symbol, interval, 
              ema, macd, tp, sl, buy_pct)
