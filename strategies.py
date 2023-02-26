@@ -6,7 +6,7 @@ import pandas as pd
 
 from Moduls.data_modul import *
 if TYPE_CHECKING:
-    from Connectors.binance_connectore import BinanceClient
+    from Connectors.binance_connector import BinanceClient
 
 import warnings
 warnings.filterwarnings('ignore')

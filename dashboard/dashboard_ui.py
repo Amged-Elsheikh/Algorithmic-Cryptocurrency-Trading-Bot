@@ -5,7 +5,7 @@ import pandas as pd
 from dash import dash_table, dcc
 
 if TYPE_CHECKING:
-    from Connectors.binance_connectore import BinanceClient
+    from Connectors.binance_connector import BinanceClient
 from Moduls.data_modul import *
 from strategies import intervals_to_sec
 
