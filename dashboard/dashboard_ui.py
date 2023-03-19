@@ -1,95 +1,191 @@
 from typing import *
+from functools import partial
 
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import dash_table, dcc
+from dash import dash_table, dcc, html
 
 if TYPE_CHECKING:
     from Connectors.binance_connector import BinanceClient
 from Moduls.data_modul import *
 from strategies import intervals_to_sec
+from datetime import datetime
 
-
+# Helpful Functions
 def get_contracts(clients: Dict[str, 'BinanceClient']) -> Dict[str, Contract]:
-    for client in clients:
-        contracts = {f"{client}: {symbol}": contract
-                     for symbol, contract in clients[client].items()}
+    contracts = dict()
+    for exchange, client in clients.items():
+        contracts.update(
+            {f"{exchange} {symbol}": contract 
+             for symbol, contract in client.contracts.items()}
+        )
     return contracts
 
 
-def contracts_layout(clients: Dict[str, 'BinanceClient']):
-    contracts = get_contracts(clients)
+#################################### NAV BAR ####################################
+def nav_bar():
+    nav_bar = dbc.Navbar(dbc.Container([
+        html.A('AMGED', className='navbar-brand'), 
+        dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
+        dbc.Collapse(),
+        ], fluid=True))
+    return nav_bar
     
-    contracts_dropdown = dbc.Col([
-        dcc.Dropdown(options=list(contracts.keys()),
-                     multi=False,
-                     placeholder="Select Contract to track",
-                     id="contracts_dropdown")])
+    
+#################################### Upper Container ####################################
+def upper_container(clients: Dict[str, 'BinanceClient']):
+    contracts = get_contracts(clients)
+    watchlist_contracts = html.Div([
+        html.Div(html.Label('Contract'), className="col-auto"),
+        html.Div(dcc.Dropdown(options=list(contracts.keys()),
+                              value=None, 
+                              id="watchlist-select"),
+                 className="col")],
+                                   className="row my-3")
+    
+    watchlist_contracts = html.Div(watchlist_contracts, 
+                                   className="col-5 container-fluid")
+    
+    strategy_component = html.Div(strategy_selector(contracts),
+                                  className="col-7 container-fluid text-center", 
+                                  id="right-window-upper")
+    
+    container = html.Div([watchlist_contracts, strategy_component],
+                          className="row pt-3 container-fluid up-container")
+    return container
 
+
+def strategy_selector(contracts):
+    contracts_dropmenu = html.Div(
+        [html.Span("Contract"),
+         dbc.Select(options=list(contracts.keys()),
+                    value=None, id="strategy-contracts",
+                    class_name="small-font")],
+        className="col-3 strategy-component ms-4")
+    
+    entry_pct = html.Div(
+        [html.Span("Entry pct"),
+         dbc.Input(type='number', id="entry-pct", 
+                   class_name="form-control small-font")],
+        className="col-1 strategy-component"
+    )
+    
+    tp_entry = html.Div(
+        [html.Span("TP"),
+         dbc.Input(type='number', id="take-profit", 
+                   class_name="form-control small-font")],
+        className="col-1 strategy-component"
+    )
+    
+    tp_entry = html.Div(
+        [html.Span("TP"),
+         dbc.Input(type='number', id="take-profit", 
+                   class_name="form-control small-font")],
+        className="col-1 strategy-component"
+    )
+    
+    sl_entry = html.Div(
+        [html.Span("SL"),
+         dbc.Input(type='number', id="stop-loss", 
+                   class_name="form-control small-font")],
+        className="col-1 strategy-component"
+    )
+    
+    strategy = html.Div(
+        [html.Span("Strategy"),
+         dbc.Select(options=['Technical'],
+                    value='Technical', id="strategy-select",
+                    class_name="from-select small-font")],
+        className="col-2 strategy-component"
+    )
+    
+    buttons = dbc.ButtonGroup(
+        [
+            dbc.Button("Extra Param", id="strategy-param", 
+                       outline=True, color="secondary", className="me-1"),
+            dbc.Button(html.I(className="bi bi-bag-plus-fill"),
+                       outline=True, color="secondary", className="me-1",
+                       id="strategy-add",)
+        ], class_name="btn-group btn-group-sm col-3 strategy-component"
+    )
+    
+    strategy_component = dbc.Form([contracts_dropmenu, entry_pct, tp_entry,
+                                   sl_entry, strategy, buttons],
+                                   class_name="row new-strategy"),
+    return strategy_component
+    
+
+def middel_container():
+    custom_table = partial(dash_table.DataTable,
+                           fixed_rows={"headers": True},
+                           page_size=100, cell_selectable=True,
+                           style_table={'height': '20rem', 'overflowY': 'auto'},
+                           style_cell={'textAlign': 'center'},
+                           style_header={'fontWeight': 'bold', 'backgroundColor': 'white',},
+                           style_as_list_view=True)
+    
+    # left table
     columns = ["symbol", "exchange", "bidPrice", "askPrice"]
     data = pd.DataFrame(index=["id"], columns=columns)
     
-    table = dash_table.DataTable(data=data.to_dict("records"),
-                                 columns=[{"name": i, "id": i} for i in data.columns],
-                                 style_table={"height": "300px", "overflowY": "auto"},
-                                 fixed_rows={"headers": True}, page_size=20,
-                                 id="ws_table", row_deletable=True)
-
-    header = dbc.Container(contracts_dropdown, class_name="container-fluid, mt-3 mb-3")
-    return dbc.Row(dbc.Container([header, table], class_name="col-6"))
-
-
-def percentage_container(labels: Set[str], max_=None):
-    containers = [[dbc.Label(f'{label} %'), 
-                  dbc.Input(value=10, type='number',
-                            min=1, max=max_, step=1,
-                            id=label.replace(' ', '_').lower())]
-                 for label in labels]
+    watchlist_table = custom_table(data=data.to_dict("records"),
+                                   columns=[{"name": i, "id": i} 
+                                            for i in data.columns])
+    
+    columns = ['Exchange', "Symbol", "Qty", "Entry Price", "Current Price", "uPnl", " ", "  "]
+    data = pd.DataFrame(index=["id"], columns=columns)
+    
+    strategy_table = custom_table(data=data.to_dict("records"),
+                                  columns=[{"name": i, "id": i}  for i in data.columns],
+                                  id="uPnL-table")
+    
+    mid_container = html.Div([
+        html.Div(watchlist_table, className='col-5'),
+        html.Div(strategy_table, className='col-7')],
+                             className="row pt-3 container-fluid mid-container")
+    return mid_container
     
     
-    pct_container = dbc.Col(dbc.Row([dbc.Col(container, width=12//len(containers)) 
-                                     for container in containers]),
-                            width=len(containers))
-    return pct_container
-
-
-def technical_container(name: str, types: List):
-    indicator_labels = [dbc.Col(f"{label[0].capitalize()}") for label in types]
-    indicator_inputs = [dbc.Col(dbc.Input(type='number', id=f'{label[0]}_{name.lower()}', 
-                                          value=label[1], min=1)) 
-                        for label in types]
+def bottom_container():
+    logs_list = html.Div(html.Ol(children=[],
+                                 id='logs-list',
+                                 className="list-group"),
+                         className="logs-list")
     
-    indicator_container = dbc.Col([dbc.Label(f'{name}'),
-                                   dbc.Row(indicator_labels),
-                                   dbc.Row(indicator_inputs)],
-                                  width = len(types),
-                                  class_name='border border-secondary m-3')
-    return indicator_container
+    left = html.Div([html.H3("Logs"), logs_list],
+                    className="col-5 logs-container text-justify")
+    
+    container = html.Div([left], 
+                         className="row pt-3 container-fluid h-100", 
+                         id="bottom-container")
+    return container
 
 
-def strategy_layout(clients: Dict[str, 'BinanceClient']):
-    contracts = get_contracts(clients)
-    contracts_dropdown = dbc.Col([dbc.Label('Trading Pair'),
-                                  dcc.Dropdown(options=list(contracts.keys()),
-                                               value='Binance: BTCUSDT',
-                                               multi=False, placeholder="contracts",
-                                               id="strategy_contracts_dropdown")],
-                                 class_name='align-items-center', width=2)
+def footer():
+    facebook = html.A(html.I(className="fab fa-facebook-f"),
+                      className="btn text-white btn-floating m-1 facebook")
     
-    entry_box = dbc.Row([contracts_dropdown, 
-                        percentage_container({'TP', 'SL'}), 
-                        percentage_container({'Buy'})],
-                       className='align-items-center text-center')
+    twitter = html.A(html.I(className="fab fa-twitter"),
+                     className="btn text-white btn-floating m-1 twitter")
     
-    technical_box = dbc.Row([technical_container('EMA', [['fast', 7], ['slow', 25]]),
-                             technical_container('MACD', [['fast', 12], ['slow', 26], ['signal', 9]])],
-                            className='align-items-center text-center')
+    google = html.A(html.I(className="fab fa-google"),
+                    className="btn text-white btn-floating m-1 google")
     
-    button = dbc.Button('Run Strategy', id='run_strategy', class_name='btn btn-primary')
+    instagram = html.A(html.I(className="fab fa-instagram"),
+                       className="btn text-white btn-floating m-1 instagram")
     
-    intervals_container = dcc.Dropdown(options=list(intervals_to_sec.keys()),
-                                       multi=False, value='30m',
-                                       placeholder="Select trading interval",
-                                       id="interval_dropdown")
+    linkedin = html.A(html.I(className="fab fa-linkedin-in"),
+                      className="btn text-white btn-floating m-1 linkedin")
     
-    return dbc.Container([entry_box, technical_box, intervals_container, button])
+    github = html.A(html.I(className="fab fa-github"),
+                    className="btn text-white btn-floating m-1 github")
+    
+    container = html.Div([
+        html.Span(f"© Copyright {datetime.now().year} Amged. Created using Plotly Dash",
+                  className="text-dark"),
+        html.Section([facebook, twitter, google, instagram, linkedin, github],
+                     className="container p-1 pb-0")])
+    
+    container = html.Footer(container,
+                            className="bg-light text-center pb-3 fixed-bottom")
+    return container
