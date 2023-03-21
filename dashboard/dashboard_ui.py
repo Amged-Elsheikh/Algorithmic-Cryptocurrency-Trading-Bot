@@ -129,7 +129,8 @@ def middel_container():
     
     watchlist_table = custom_table(data=data.to_dict("records"),
                                    columns=[{"name": i, "id": i} 
-                                            for i in data.columns])
+                                            for i in data.columns],
+                                   id='watchlist-table')
     
     columns = ['Exchange', "Symbol", "Qty", "Entry Price", "Current Price", "uPnl", " ", "  "]
     data = pd.DataFrame(index=["id"], columns=columns)
@@ -191,14 +192,14 @@ def footer():
 
 
 def technical_modal():
-    def technicl_modal_component(title: str, indicators: List[str]):
+    def technicl_modal_component(title: str, indicators: Dict[str, int]):
         int_input = partial(dbc.Input, type="number", value=1, 
                             step=1, min=1)
         
         indicator_entry = []
-        for indicator in indicators:
+        for indicator, value in indicators.items():
             text = dbc.InputGroupText(indicator)
-            input_ = int_input(value=1, 
+            input_ = int_input(value=value, 
                             id=indicator.replace(" ","-").lower())
             indicator_entry.append(dbc.InputGroup([text, input_],
                                                   className="mb-3"))
@@ -206,13 +207,13 @@ def technical_modal():
         return indicator_component
     
     ema_component = technicl_modal_component(
-        'EMA', ['fast EMA', 'slow EMA']
+        'EMA', {'fast EMA':9, 'slow EMA':25}
         )
     macd_component = technicl_modal_component(
-        "MACD", ["fast MACD", "slow MACD", "MACD signal"]
+        "MACD", {"fast MACD":12, "slow MACD":26, "MACD signal":9}
         )
     rsi_component = technicl_modal_component(
-        "RSI", ["RSI period",]
+        "RSI", {"RSI period":12}
     )
     
     modal = dbc.Modal([
