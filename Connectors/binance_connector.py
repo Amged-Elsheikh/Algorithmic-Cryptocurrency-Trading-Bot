@@ -63,6 +63,7 @@ class BinanceClient:
         Once counter reach Zero, unsubscribe the aggTrade channel. The first key is the symbol, and the item is another dictionary.
         For the 2nd dict, the keys are the counter 'count' and the 'id' for the web socket
         """
+        self.run()
         
     def _init(self, is_spot: bool, is_test: bool):
         # Spot Trading
@@ -109,7 +110,7 @@ class BinanceClient:
                 self.logger.warning(msg)
                 raise Exception(msg)
             else:
-                flag += 1
+                connection_flag += 1
                 time.sleep(3)
         return True
         
@@ -252,7 +253,7 @@ class BinanceClient:
 
     def _on_close(self, ws: websocket.WebSocketApp):
         self._reconnect = False
-        self.logger.info("Websoccet disconnect")
+        self.logger.info("Websocket disconnect")
         
     def _on_message(self, ws: websocket.WebSocketApp, msg):
         """This is the argument that will form most of the connections between the backend and frontend 
@@ -350,7 +351,8 @@ class BinanceClient:
             strategy.had_assits = False
         return
     
-    def _PnLcalciator(self, strategy: 'Strategy', sell_order: Order) ->float:
+    @classmethod
+    def _PnLcalciator(cls, strategy: 'Strategy', sell_order: Order) ->float:
         sell_margin = sell_order.quantity * sell_order.price
         buy_margin = strategy.order.quantity * strategy.order.price
         return sell_margin - buy_margin
