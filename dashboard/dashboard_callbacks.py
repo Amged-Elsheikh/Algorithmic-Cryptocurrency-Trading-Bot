@@ -1,33 +1,31 @@
-import dash
-from dash import Input, Output, State
-import dash_bootstrap_components as dbc
+from dash import Input, Output, State, callback
 
-from strategies import Strategy
+from strategies import TechnicalStrategies
 from Moduls.data_modul import Contract
 from app import clients
 
-@dash.callback(Output(component_id='contracts_dropdown', component_property='value'),
-               Input(component_id='contracts_dropdown', component_property='value'))
+
+@callback(Output(component_id='watchlist-select', component_property='value'),
+          Input(component_id='watchlist-select', component_property='value'))
 def subscribe_to_new_stream(value: str):
     if value:
         exchange, symbol = value.split(" ")
-        clients[exchange].new_subscribe(symbol)
-        
+        clients[exchange].new_subscribe(symbol, channel="bookTicker")
     return None
 
-@dash.callback(Output(component_id='ws_table', component_property='data'),
-               Input(component_id='watchlist_interval', component_property='n_intervals'))
+
+@callback(Output(component_id='watchlist-table', component_property='data'),
+          Input(component_id='watchlist_interval', component_property='n_intervals'))
 def ws_data_update(*args):
     data = [{'symbol': price.symbol, 'exchange': price.exchange,
              'bidPrice': price.bid, 'askPrice': price.ask}
-            
             for price in clients['Binance'].prices.values()]
     return data
 
-@dash.callback(Output(component_id='ws_table', component_property='page_size'),
-               Input(component_id='ws_table', component_property='data_previous'),
-               State(component_id='ws_table', component_property='data'))
 
+@callback(Output(component_id='watchlist-table', component_property='page_size'),
+          Input(component_id='watchlist-table', component_property='data_previous'),
+          State(component_id='watchlist-table', component_property='data'))
 def unsubscribe_channel(prev_data, data):
     if prev_data:
         if len(prev_data)==1:
@@ -40,34 +38,36 @@ def unsubscribe_channel(prev_data, data):
     return 20
 
 
-@dash.callback(Output(component_id='strategy_contracts_dropdown', component_property='value'),
-               Input(component_id='run_strategy', component_property='n_clicks'),
-               State(component_id='strategy_contracts_dropdown', component_property='value'), 
-               State(component_id='tp', component_property='value'),
-               State(component_id='sl', component_property='value'),
-               State(component_id='buy', component_property='value'),
-               State(component_id='fast_ema', component_property='value'),
-               State(component_id='slow_ema', component_property='value'),
-               State(component_id='fast_macd', component_property='value'),
-               State(component_id='slow_macd', component_property='value'),
-               State(component_id='signal_macd', component_property='value'),
-               State(component_id='interval_dropdown', component_property='value'),
-               prevent_initial_call=True)
-def start_strategy(n_click, contract: Contract, tp, sl, 
-                   buy_pct, fast_ema, slow_ema, fast_macd, 
-                   slow_macd, macd_signal, interval):
-    
-    if fast_ema > slow_ema:
-        raise 'Fast EMA should be less than slow EMA' 
-    ema = {'slow': slow_ema, 'fast': fast_ema}
-    
-    if fast_macd > slow_macd:
-        raise 'Fast MACD should be less than slow MACD'
-    
-    macd = {'slow': slow_macd, 'fast': fast_macd, 
-            'signal': macd_signal}
-    exchange, symbol = contract.split(': ')
-    
-    Strategy(clients[exchange], symbol, interval, 
-             ema, macd, tp, sl, buy_pct)
+@callback(Output(component_id='strategy-contracts-dropdown', component_property='value'),
+          Input(component_id='add-strategy-btn', component_property='n_clicks'),
+          State(component_id='strategy-contracts-dropdown', component_property='value'), 
+          State(component_id='entry-pct', component_property='value'),
+          State(component_id='take-profit', component_property='value'),
+          State(component_id='stop-loss', component_property='value'),
+          State(component_id='interval-dropdown', component_property='value'),
+          State(component_id="strategy-type-select", component_property="value"),
+          State(component_id='fast-ema', component_property='value'),
+          State(component_id='slow-ema', component_property='value'),
+          State(component_id='fast-macd', component_property='value'),
+          State(component_id='slow-macd', component_property='value'),
+          State(component_id='macd-signal', component_property='value'),
+          State(component_id="rsi-period", component_property='value'),
+          prevent_initial_call=True)
+def start_strategy(n_click, contract: Contract, buy_pct,
+                   tp, sl, interval, strategy_type,
+                   fast_ema, slow_ema, fast_macd,
+                   slow_macd, macd_signal, rsi):
+    if strategy_type=="Technical":
+        ema = {"fast": fast_ema,
+               "slow": slow_ema}
+        
+        macd = {"fast": fast_macd,
+                "slow": slow_macd, 
+                "signal": macd_signal}
+        
+        exchange, symbol = contract.split(' ')
+        TechnicalStrategies(client=clients[exchange], symbol=symbol,
+                            interval=interval, tp=tp, sl=sl,
+                            buy_pct=buy_pct, ema=ema, macd=macd,
+                            rsi=rsi)
     return None

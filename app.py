@@ -25,11 +25,12 @@ app.layout = html.Div([nav_bar(),
                             middel_container(),
                             bottom_container(),
                             footer(),
-                            technical_modal()
+                            technical_modal(),
+                            dcc.Interval(id='watchlist_interval', interval=1000)
                             ],
                            className="body-container")])
 
-# from dashboard.dashboard_callbacks import *
+from dashboard.dashboard_callbacks import *
 
 if __name__ == '__main__':
     app.run(debug=True)
