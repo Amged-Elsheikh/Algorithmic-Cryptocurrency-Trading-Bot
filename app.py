@@ -24,8 +24,10 @@ app.layout = html.Div([nav_bar(),
                             upper_container(clients),
                             middel_container(),
                             bottom_container(),
-                            footer()],
-                           className="body-container mx-5")])
+                            footer(),
+                            technical_modal()
+                            ],
+                           className="body-container")])
 
 # from dashboard.dashboard_callbacks import *
 

@@ -3,7 +3,8 @@ from functools import partial
 
 import dash_bootstrap_components as dbc
 import pandas as pd
-from dash import dash_table, dcc, html
+import dash
+from dash import dash_table, dcc, html, Input, Output, State
 
 if TYPE_CHECKING:
     from Connectors.binance_connector import BinanceClient
@@ -22,7 +23,6 @@ def get_contracts(clients: Dict[str, 'BinanceClient']) -> Dict[str, Contract]:
     return contracts
 
 
-#################################### NAV BAR ####################################
 def nav_bar():
     nav_bar = dbc.Navbar(dbc.Container([
         html.A('AMGED', className='navbar-brand'), 
@@ -31,8 +31,7 @@ def nav_bar():
         ], fluid=True))
     return nav_bar
     
-    
-#################################### Upper Container ####################################
+
 def upper_container(clients: Dict[str, 'BinanceClient']):
     contracts = get_contracts(clients)
     watchlist_contracts = html.Div([
@@ -101,11 +100,11 @@ def strategy_selector(contracts):
     
     buttons = dbc.ButtonGroup(
         [
-            dbc.Button("Extra Param", id="strategy-param", 
+            dbc.Button("Extra Param", id="extra-param-btn", n_clicks=0,
                        outline=True, color="secondary", className="me-1"),
             dbc.Button(html.I(className="bi bi-bag-plus-fill"),
                        outline=True, color="secondary", className="me-1",
-                       id="strategy-add",)
+                       id="strategy-add", n_clicks=0)
         ], class_name="btn-group btn-group-sm col-3 strategy-component"
     )
     
@@ -189,3 +188,52 @@ def footer():
     container = html.Footer(container,
                             className="bg-light text-center pb-3 fixed-bottom")
     return container
+
+
+def technical_modal():
+    def technicl_modal_component(title: str, indicators: List[str]):
+        int_input = partial(dbc.Input, type="number", value=1, 
+                            step=1, min=1)
+        
+        indicator_entry = []
+        for indicator in indicators:
+            text = dbc.InputGroupText(indicator)
+            input_ = int_input(value=1, 
+                            id=indicator.replace(" ","-").lower())
+            indicator_entry.append(dbc.InputGroup([text, input_],
+                                                  className="mb-3"))
+        indicator_component = html.Div([html.H2(title), *indicator_entry])
+        return indicator_component
+    
+    ema_component = technicl_modal_component(
+        'EMA', ['fast EMA', 'slow EMA']
+        )
+    macd_component = technicl_modal_component(
+        "MACD", ["fast MACD", "slow MACD", "MACD signal"]
+        )
+    rsi_component = technicl_modal_component(
+        "RSI", ["RSI period",]
+    )
+    
+    modal = dbc.Modal([
+        dbc.ModalHeader(dbc.ModalTitle("Technical Strategy Parameters")),
+        dbc.ModalBody([ema_component, macd_component, rsi_component]),
+        dbc.ModalFooter(dbc.Button("Close", id="technical-modal-close",
+                                   className="ms-auto", n_clicks=0))],
+                      id="technical-modal",
+                      is_open=False)
+    return modal
+
+
+@dash.callback(Output(component_id="technical-modal", component_property="is_open"),
+          Input(component_id="technical-modal-close", component_property="n_clicks"),
+          Input(component_id="extra-param-btn", component_property="n_clicks"),
+          State(component_id="strategy-select", component_property="value"),
+          State(component_id="technical-modal", component_property="is_open"))
+def open_modal(close_btn, open_btn, strategy: str, modal_state: bool):
+    if open_btn==0:
+        return False
+    elif modal_state:
+        return False
+    elif strategy == "Technical":
+        return True
