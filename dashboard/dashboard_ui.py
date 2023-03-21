@@ -58,20 +58,13 @@ def strategy_selector(contracts):
     contracts_dropmenu = html.Div(
         [html.Span("Contract"),
          dbc.Select(options=list(contracts.keys()),
-                    value=None, id="strategy-contracts",
+                    value=None, id="strategy-contracts-dropdown",
                     class_name="small-font")],
         className="col-3 strategy-component ms-4")
     
     entry_pct = html.Div(
         [html.Span("Entry pct"),
          dbc.Input(type='number', id="entry-pct", 
-                   class_name="form-control small-font")],
-        className="col-1 strategy-component"
-    )
-    
-    tp_entry = html.Div(
-        [html.Span("TP"),
-         dbc.Input(type='number', id="take-profit", 
                    class_name="form-control small-font")],
         className="col-1 strategy-component"
     )
@@ -90,10 +83,17 @@ def strategy_selector(contracts):
         className="col-1 strategy-component"
     )
     
+    interval = html.Div(
+        [html.Span("Interval"),
+         dbc.Select(options=list(intervals_to_sec.keys()),
+                    value="1h", id="interval-dropdown",
+                    class_name="small-font")],
+        className="col-1 strategy-component")
+    
     strategy = html.Div(
         [html.Span("Strategy"),
          dbc.Select(options=['Technical'],
-                    value='Technical', id="strategy-select",
+                    value='Technical', id="strategy-type-select",
                     class_name="from-select small-font")],
         className="col-2 strategy-component"
     )
@@ -104,12 +104,12 @@ def strategy_selector(contracts):
                        outline=True, color="secondary", className="me-1"),
             dbc.Button(html.I(className="bi bi-bag-plus-fill"),
                        outline=True, color="secondary", className="me-1",
-                       id="strategy-add", n_clicks=0)
-        ], class_name="btn-group btn-group-sm col-3 strategy-component"
+                       id="add-strategy-btn", n_clicks=0)
+        ], class_name="btn-group btn-group-sm col-2 strategy-component"
     )
     
     strategy_component = dbc.Form([contracts_dropmenu, entry_pct, tp_entry,
-                                   sl_entry, strategy, buttons],
+                                   sl_entry, interval, strategy, buttons],
                                    class_name="row new-strategy"),
     return strategy_component
     
@@ -229,7 +229,7 @@ def technical_modal():
 @dash.callback(Output(component_id="technical-modal", component_property="is_open"),
           Input(component_id="technical-modal-close", component_property="n_clicks"),
           Input(component_id="extra-param-btn", component_property="n_clicks"),
-          State(component_id="strategy-select", component_property="value"),
+          State(component_id="strategy-type-select", component_property="value"),
           State(component_id="technical-modal", component_property="is_open"))
 def open_modal(close_btn, open_btn, strategy: str, modal_state: bool):
     if open_btn==0:
