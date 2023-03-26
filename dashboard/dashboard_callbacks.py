@@ -5,6 +5,12 @@ from Moduls.data_modul import Contract
 from app import clients
 
 
+def get_removed_row(prev_data, data):
+    for item in prev_data:
+        if item not in data:
+            return item
+        
+        
 @callback(Output(component_id='watchlist-select', component_property='value'),
           Input(component_id='watchlist-select', component_property='value'))
 def subscribe_to_new_stream(value: str):
@@ -15,27 +21,20 @@ def subscribe_to_new_stream(value: str):
 
 
 @callback(Output(component_id='watchlist-table', component_property='data'),
-          Input(component_id='watchlist_interval', component_property='n_intervals'))
-def ws_data_update(*args):
-    data = [{'symbol': price.symbol, 'exchange': price.exchange,
-             'bidPrice': price.bid, 'askPrice': price.ask}
-            for price in clients['Binance'].prices.values()]
-    return data
-
-
-@callback(Output(component_id='watchlist-table', component_property='page_size'),
           Input(component_id='watchlist-table', component_property='data_previous'),
+          Input(component_id='watchlist_interval', component_property='n_intervals'),
           State(component_id='watchlist-table', component_property='data'))
-def unsubscribe_channel(prev_data, data):
-    if prev_data:
-        if len(prev_data)==1:
-            item = prev_data[0]
-        else:
-            for item in prev_data:
-                if item not in data:
-                    break
-        clients['Binance'].unsubscribe_channel(item['symbol'])
-    return 20
+def update_watchlist_table(prev_data, n, data):
+    if prev_data and len(prev_data) != len(data):
+        removed_row = get_removed_row(prev_data, data)
+        exchange = removed_row['exchange']
+        symbol = removed_row['symbol']
+        clients[exchange].unsubscribe_channel(removed_row[symbol], "bookTicker")
+    else:
+        data = [{'symbol': price.symbol, 'exchange': price.exchange,
+                 'bidPrice': price.bid, 'askPrice': price.ask}
+                for price in clients['Binance'].prices.values()]
+    return data
 
 
 @callback(Output(component_id='strategy-contracts-dropdown', component_property='value'),
