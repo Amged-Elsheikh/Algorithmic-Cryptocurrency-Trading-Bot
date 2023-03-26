@@ -121,7 +121,8 @@ def middel_container():
                            style_table={'height': '20rem', 'overflowY': 'auto'},
                            style_cell={'textAlign': 'center'},
                            style_header={'fontWeight': 'bold', 'backgroundColor': 'white',},
-                           style_as_list_view=True)
+                           style_as_list_view=True,
+                           row_deletable=True)
     
     # left table
     columns = ["symbol", "exchange", "bidPrice", "askPrice"]
@@ -132,7 +133,7 @@ def middel_container():
                                             for i in data.columns],
                                    id='watchlist-table')
     
-    columns = ['Exchange', "Symbol", "Qty", "Entry Price", "Current Price", "uPnl", " ", "  "]
+    columns = ['Exchange', "Symbol", "Qty", "Entry Price", "Current Price", "uPnl", " "]
     data = pd.DataFrame(index=["id"], columns=columns)
     
     strategy_table = custom_table(data=data.to_dict("records"),
