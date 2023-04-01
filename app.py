@@ -26,11 +26,12 @@ app.layout = html.Div([nav_bar(),
                             bottom_container(),
                             footer(),
                             technical_modal(),
-                            dcc.Interval(id='watchlist_interval', interval=1000)
+                            dcc.Interval(id='watchlist-interval', interval=1000),
+                            dcc.Interval(id='websocket-init', max_intervals=1)
                             ],
                            className="body-container")])
 
 from dashboard.dashboard_callbacks import *
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)

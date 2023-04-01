@@ -1,4 +1,4 @@
-from dash import Input, Output, State, callback
+from dash import Input, Output, State, callback, ctx
 
 from strategies import TechnicalStrategies
 from Moduls.data_modul import Contract
@@ -10,6 +10,15 @@ def get_removed_row(prev_data, data):
         if item not in data:
             return item
         
+
+@callback(Output(component_id="websocket-init", component_property="disabled"),
+          Input(component_id="websocket-init", component_property="n_intervals"),
+          prevent_initial_call=True)
+def start_websockets(*args):
+    for client in clients.values():
+        client.run()
+    return True
+
         
 @callback(Output(component_id='watchlist-select', component_property='value'),
           Input(component_id='watchlist-select', component_property='value'))
@@ -22,14 +31,15 @@ def subscribe_to_new_stream(value: str):
 
 @callback(Output(component_id='watchlist-table', component_property='data'),
           Input(component_id='watchlist-table', component_property='data_previous'),
-          Input(component_id='watchlist_interval', component_property='n_intervals'),
+          Input(component_id='watchlist-interval', component_property='n_intervals'),
           State(component_id='watchlist-table', component_property='data'))
 def update_watchlist_table(prev_data, n, data):
-    if prev_data and len(prev_data) != len(data):
+    triggered = ctx.triggered_id
+    if triggered == 'watchlist-table':
         removed_row = get_removed_row(prev_data, data)
         exchange = removed_row['exchange']
         symbol = removed_row['symbol']
-        clients[exchange].unsubscribe_channel(removed_row[symbol], "bookTicker")
+        clients[exchange].unsubscribe_channel(symbol, "bookTicker")
     else:
         data = [{'symbol': price.symbol, 'exchange': price.exchange,
                  'bidPrice': price.bid, 'askPrice': price.ask}

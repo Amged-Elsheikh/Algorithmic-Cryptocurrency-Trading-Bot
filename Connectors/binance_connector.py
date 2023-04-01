@@ -43,15 +43,14 @@ class BinanceClient:
                            "DELETE": requests.delete}
         logging.config.fileConfig("logger.config")
         self.logger = logging.getLogger(__name__)
-
         # Check internet connection
         self._check_internet_connection()
-
-        self.logger.info("Client connected Successfuly")
+        self.logger.info("Internet connection established.")
         self.contracts = self._get_contracts()
         self.prices = defaultdict(Price)
 
         # Websocket connection
+        self._ws_connect = False
         self.id = 1
         self.bookTicker_subscribtion_list: Dict[Contract, int] = dict()
         # running_startegies key: "symbol_id", value: strategy object
@@ -63,7 +62,11 @@ class BinanceClient:
         Once counter reach Zero, unsubscribe the aggTrade channel. The first key is the symbol, and the item is another dictionary.
         For the 2nd dict, the keys are the counter 'count' and the 'id' for the web socket
         """
-        self.run()
+        
+    def run(self):
+        self._ws_connect = True
+        t = Thread(target=self._start_ws)
+        t.start()
         
     def _init(self, is_spot: bool, is_test: bool):
         # Spot Trading
@@ -75,7 +78,6 @@ class BinanceClient:
         elif is_spot and not is_test:
             self._base_url = 'https://api.binance.com/api'
             self._ws_url = 'wss://stream.binance.com:9443/ws'
-        
         # Future Trading
         # Test net
         elif not is_spot and is_test:
@@ -85,14 +87,8 @@ class BinanceClient:
         elif not is_spot and not is_test:
             self._base_url = 'https://fapi.binance.com'
             self._ws_url = 'wss://fstream.binance.com/ws'
-            
         self._api_key = f"Binance{'Spot' if is_spot else 'Future'}{'Test' if is_test else ''}APIKey"
         self._api_secret = self._api_key.replace('APIKey', 'APISecret')
-        
-    def run(self):
-        self._reconnect = True
-        t = Thread(target=self._start_ws)
-        t.start()
         
     @property
     def _is_connected(self):
@@ -234,7 +230,7 @@ class BinanceClient:
         # Reopen the websocket connection if it terminated
         while True:
             try:
-                if (self._reconnect): 
+                if (self._ws_connect): 
                     # Reconnect unless the interface is closed by the user
                     self._ws.run_forever()  # Blocking method that ends only if the websocket connection drops
                 else:
@@ -252,7 +248,7 @@ class BinanceClient:
         self.logger.error(f"Error: {error}")
 
     def _on_close(self, ws: websocket.WebSocketApp):
-        self._reconnect = False
+        self._ws_connect = False
         self.logger.info("Websocket disconnect")
         
     def _on_message(self, ws: websocket.WebSocketApp, msg):
