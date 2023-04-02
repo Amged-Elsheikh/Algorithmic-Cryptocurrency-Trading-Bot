@@ -1,16 +1,19 @@
-from typing import *
 from functools import partial
+from typing import TYPE_CHECKING, Dict
 
+import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
-import dash
-from dash import dash_table, dcc, html, Input, Output, State
+from dash import Input, Output, State, dash_table, dcc, html
 
 if TYPE_CHECKING:
     from Connectors.binance_connector import BinanceClient
-from Moduls.data_modul import *
-from strategies import intervals_to_sec
+
 from datetime import datetime
+
+from Moduls.data_modul import Contract
+from strategies import intervals_to_sec
+
 
 # Helpful Functions
 def get_contracts(clients: Dict[str, 'BinanceClient']) -> Dict[str, Contract]:

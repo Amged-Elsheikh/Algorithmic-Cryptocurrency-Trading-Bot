@@ -7,7 +7,7 @@ import os
 import time
 from collections import defaultdict
 from threading import Thread
-from typing import TYPE_CHECKING, Dict, Set, Union
+from typing import TYPE_CHECKING, Dict, List, Set, Union
 from urllib.parse import urlencode
 
 import requests
@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from requests.exceptions import RequestException
 from requests.models import Response
 
-from Moduls.data_modul import *
+from Moduls.data_modul import Balance, CandleStick, Contract, Order, Price
 
 if TYPE_CHECKING:
     from strategies import Strategy
@@ -45,7 +45,7 @@ class BinanceClient:
         self.logger = logging.getLogger(__name__)
         # Check internet connection
         self._check_internet_connection()
-        self.logger.info("Internet connection established.")
+        self.logger.info("Internet connection established")
         self.contracts = self._get_contracts()
         self.prices = defaultdict(Price)
 
@@ -170,9 +170,7 @@ class BinanceClient:
         return None
 
     ########################## TRADE Arguments ##########################
-    def _make_order(
-        self, contract: Contract, order_side: str, order_type: str, **kwargs
-    ) -> Order | None:
+    def _make_order(self, contract: Contract, order_side: str, order_type: str, **kwargs) -> Order | None:
         """Make a Buy/Long or Sell/Short order for a given contract. 
         This argument is a private argument and can only be accesed within the connecter,
         when a buying or selling signal is found, or when canceling the runnning strategy"""
@@ -375,7 +373,7 @@ class BinanceClient:
             else:
                 self.unsubscribe_channel(symbol, 'aggTrade', strategy)
         return
-          
+    
     def _process_dicision(self, strategy: 'Strategy', decision: str, latest_price: float):
         if 'buy' in decision and not strategy.had_assits:
             # Binance don't allow less than 10$ transaction
@@ -409,4 +407,3 @@ class BinanceClient:
                 # If there is an existing order and indicators are not good, SELL
                 self._sell_strategy_asset(strategy)
         return
-    

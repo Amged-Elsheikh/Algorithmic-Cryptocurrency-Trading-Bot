@@ -1,14 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import *
+from typing import TYPE_CHECKING, Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 
-from Moduls.data_modul import *
+from Moduls.data_modul import Order
+
 if TYPE_CHECKING:
     from Connectors.binance_connector import BinanceClient
 
 import warnings
+
 warnings.filterwarnings('ignore')
 
 

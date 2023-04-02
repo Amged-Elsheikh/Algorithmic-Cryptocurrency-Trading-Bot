@@ -1,9 +1,6 @@
-from typing import *
-
 import dash
 import dash_bootstrap_components as dbc
 
-from Moduls.data_modul import *
 from Connectors.binance_connector import BinanceClient
 from dashboard.dashboard_ui import *
 
@@ -26,8 +23,8 @@ app.layout = html.Div([nav_bar(),
                             bottom_container(),
                             footer(),
                             technical_modal(),
-                            dcc.Interval(id='watchlist-interval', interval=1000),
-                            dcc.Interval(id='websocket-init', max_intervals=1)
+                            dash.dcc.Interval(id='watchlist-interval', interval=1000),
+                            dash.dcc.Interval(id='websocket-init', max_intervals=1)
                             ],
                            className="body-container")])
 
