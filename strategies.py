@@ -21,25 +21,29 @@ intervals_to_sec = { "1m": m, "15m": 15 * m, "30m": 30 * m,
                     "1h": h, "2h": 2 * h, "4h": 4 * h, "8h": 8 * h,
                     "12h": 12 * h, "1d": d, "2d": 2 * d}
 class Strategy(ABC):
-
+    new_strategy_id = 1
+    
     def __init__(self, client: 'BinanceClient', symbol: str, interval: str,
                  tp: float, sl: float, buy_pct: float):
         # running_strategies variable is a dictionary where the key is the symbol and the values is another
         self.client = client
-        if self.client.exchange=='Binance':
-            # To unsubscribe a channel in binance, you need to provide an id
-            self.id = self.client.id
-            
+        # To unsubscribe a channel in binance, you need to provide an id
+        self.symbol = symbol
         self.contract = self.client.contracts[symbol]
         self.timeframe = intervals_to_sec[interval] * 1000
         
+        self.client.new_subscribe(self.symbol, 'aggTrade')
+        self.client.logger.info('Strategy added succesfully.')
+        self.id = self.client.strategy_counter[self.symbol]['id']
+        self.strategy_id = Strategy.new_strategy_id
+        
         self.candles = self.client.get_candlestick(self.contract, interval)
-        self.order: List[Order] = []
+        self.order: Order
         self.had_assits = False
         self.is_running = True
         """Use this to remove the strategy from the connector after it's been closed"""
-        
         self.relaizedPnL = 0
+        self.unpnl = 0
         self.tp = tp # Take profit
         self.sl = sl # Stop Loss
         self.buy_pct = buy_pct # The percentage of available balance to use for the trade
@@ -50,7 +54,9 @@ class Strategy(ABC):
                 'low': [self.candles[i].low for i in range(len(self.candles))],
                 'volume': [self.candles[i].volume for i in range(len(self.candles))]}
         self.df = pd.DataFrame(data)
-
+        self.client.running_startegies[f"{self.symbol}_{self.strategy_id}"] = self
+        Strategy.new_strategy_id += 1
+        
     def _update_candles(self, price: float, volume: float, timestamp: int) -> str:
         """
         price: Last tranasaction price
@@ -90,6 +96,8 @@ class Strategy(ABC):
     @abstractmethod
     def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
         pass
+    
+    
 class TechnicalStrategies(Strategy):
     def __init__(self, client: 'BinanceClient', symbol: str, interval: str,
                  tp: float, sl: float, buy_pct: float, ema: Dict[str, int],
@@ -107,9 +115,6 @@ class TechnicalStrategies(Strategy):
         self._af_init = self._af = af
         self._af_max = af_max
         self._SAR()
-        self.client.running_startegies.add(self)
-        self.client.new_subscribe(symbol, 'aggTrade')
-        self.client.logger.info('Strategy added succesfully.')
         
     def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
         """

@@ -2,7 +2,7 @@ from dash import Input, Output, State, callback, ctx
 
 from strategies import TechnicalStrategies
 from Moduls.data_modul import Contract
-from app import clients
+from app import clients # This import is causing conflicts. App is workin, but need to be fixed
 
 
 def get_removed_row(prev_data, data):
@@ -31,19 +31,51 @@ def subscribe_to_new_stream(value: str):
 
 @callback(Output(component_id='watchlist-table', component_property='data'),
           Input(component_id='watchlist-table', component_property='data_previous'),
-          Input(component_id='watchlist-interval', component_property='n_intervals'),
+          Input(component_id='update-interval', component_property='n_intervals'),
           State(component_id='watchlist-table', component_property='data'))
 def update_watchlist_table(prev_data, n, data):
-    triggered = ctx.triggered_id
-    if triggered == 'watchlist-table':
+    if ctx.triggered_id == 'watchlist-table':
         removed_row = get_removed_row(prev_data, data)
-        exchange = removed_row['exchange']
-        symbol = removed_row['symbol']
+        exchange = removed_row['Exchange']
+        symbol = removed_row['Symbol']
         clients[exchange].unsubscribe_channel(symbol, "bookTicker")
+        # After unsubscribing, the Backend will manage to remove from the UI
     else:
-        data = [{'symbol': price.symbol, 'exchange': price.exchange,
-                 'bidPrice': price.bid, 'askPrice': price.ask}
-                for price in clients['Binance'].prices.values()]
+        data = []
+        for client in clients.values():
+            for price in client.prices.values():
+                data.append({'Symbol': price.symbol,
+                             'Exchange': price.exchange,
+                             'bidPrice': price.bid,
+                             'askPrice': price.ask})
+    return data
+
+
+@callback(Output(component_id='uPnl-table', component_property='data'),
+          Input(component_id='uPnl-table', component_property='data_previous'),
+          Input(component_id='update-interval', component_property='n_intervals'),
+          State(component_id='uPnl-table', component_property='data'))
+def update_strategy_table(prev_data, n, data):
+    if ctx.triggered_id == 'uPnl-table':
+        removed_row = get_removed_row(prev_data, data)
+        exchange = removed_row['Exchange']
+        symbol = removed_row['Symbol']
+        strategy_id = removed_row['ID']
+        strategy = clients[exchange].running_startegies[f"{symbol}_{strategy_id}"]
+        clients[exchange].unsubscribe_channel(strategy=strategy, channel="aggTrade")
+    else:
+        data = []
+        for client in clients.values():
+            for strategy in client.running_startegies.values():
+                data.append({
+                    'ID': strategy.strategy_id,
+                    'Exchange': strategy.client.exchange,
+                    'Symbol': strategy.symbol,
+                    'Qty': strategy.order.quantity if strategy.had_assits else 0,
+                    'Entry Price': strategy.order.price if strategy.had_assits else 0,
+                    'Current Price': client.prices[strategy.symbol].bid,
+                    'uPnl': f'{strategy.unpnl*100}%'
+                })
     return data
 
 

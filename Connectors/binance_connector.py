@@ -26,7 +26,6 @@ load_dotenv()
 
 class BinanceClient:
     _loaded = {}
-    
     def __new__(cls, is_spot: bool, is_test: bool):
         if (client := cls._loaded.get(f"{is_spot} {is_test}")) is None:
             client = super().__new__(cls)
@@ -53,9 +52,12 @@ class BinanceClient:
         self._ws_connect = False
         self.id = 1
         self.bookTicker_subscribtion_list: Dict[Contract, int] = dict()
-        # running_startegies key: "symbol_id", value: strategy object
-        self.running_startegies: Set[Strategy] = set()
-        """Can't a dictionary, because a single contract can have multiple running strategies"""
+        # running_startegies key: "symbol_id", value: strategy object, to be used later in the UI
+        self.running_startegies: Dict[str, Strategy] = {}
+        """Can't a dictionary, because a single contract can have multiple running strategies
+        
+        running_startegies key: "symbol_id", value: strategy object, to be used later in the UI
+        """
         self.strategy_counter: Dict[str, Dict[str, int]] = dict()
         """
         when a new strategyy added, the counter will increase, and when strategy is executed/canceled, counter will go down. 
@@ -275,12 +277,14 @@ class BinanceClient:
                 self._ws.send(json.dumps(msg))
                 self.bookTicker_subscribtion_list[self.contracts[symbol]] = self.id
                 self.id += 1
-
+                return
         elif channel == "aggTrade":
             # when starting new strategy, make sure the contract is in the bookTicker as well
             if self.contracts[symbol] not in self.bookTicker_subscribtion_list:
                 self.new_subscribe(symbol, "bookTicker")
+                
             if symbol in self.strategy_counter.keys():
+                self.strategy_counter[symbol]['count'] += 1
                 self.logger.info(f"Already subscribed to {params} channel")
             else:
                 msg = {"method": "SUBSCRIBE", "params": [params], "id": self.id}
@@ -289,26 +293,30 @@ class BinanceClient:
                 self.strategy_counter[symbol] = {'count': 1, 'id': self.id}
                 # Update the aggTrade list from the strategy object
                 self.id += 1
+            return
 
-    def unsubscribe_channel(self, symbol: str, channel="bookTicker", strategy: Union[None,'Strategy']= None):
-        params = [f"{symbol.lower()}@{channel}"]
+    def unsubscribe_channel(self, symbol: Union[str, None]=None, channel="bookTicker", strategy: Union[None,'Strategy']= None):
         
         if channel == "bookTicker":
+            params = [f"{symbol.lower()}@{channel}"]
             _id = self.bookTicker_subscribtion_list[self.contracts[symbol]]
             msg = {"method": "UNSUBSCRIBE", 
                    "params": params, "id": _id}
             self._ws.send(json.dumps(msg))
             self.bookTicker_subscribtion_list.pop(self.contracts[symbol])
             self.prices.pop(symbol)
-        
+            return
         elif channel == "aggTrade":
+            symbol = strategy.symbol
+            self.running_startegies.pop(strategy)
             self.strategy_counter[symbol]['count'] -= 1
             if self.strategy_counter[symbol]['count'] == 0:
+                params = [f"{symbol.lower()}@{channel}"]
                 msg = {"method": "UNSUBSCRIBE", "params": params,
                        "id": self.strategy_counter[symbol]['id']}
                 self._ws.send(json.dumps(msg))
                 self.strategy_counter.pop(symbol)
-                self.running_startegies.pop(strategy)
+            return
 
     ############################ Strategy Arguments ############################
     def _bookTickerMsg(self, data, symbol):
@@ -321,18 +329,17 @@ class BinanceClient:
         # Update ask/bid prices
         self.prices[symbol].bid = float(data["b"])
         self.prices[symbol].ask = float(data["a"])
-                
         for strategy in self.running_startegies:
-            if symbol == strategy.contract.symbol and strategy.had_assits:
+            if symbol == strategy.symbol and strategy.had_assits:
                 # Calculate the uPnL only when an order is made
                 self._check_tp_sl(strategy)
         return
     
     def _check_tp_sl(self, strategy: 'Strategy'):
         buying_price = strategy.order.price
-        unrealizedPnl = (1 - self.prices[strategy.contract.symbol].ask / buying_price) * 100
+        strategy.uPnl = (self.prices[strategy.symbol].ask / buying_price - 1) * 100
         # Take Profit or Stop Loss check
-        if unrealizedPnl >= strategy.tp or unrealizedPnl <= -1 * strategy.sl:
+        if strategy.uPnl >= strategy.tp or strategy.uPnl <= -1 * strategy.sl:
             self._sell_strategy_asset(strategy)
         return
 
@@ -362,7 +369,6 @@ class BinanceClient:
         trade_price = float(data['p'])
         volume = float(data['q'])
         timestamp = int(data['T'])
-                
         for strategy in self.running_startegies:
             if strategy.is_running:
                 if symbol==strategy.contract.symbol:
@@ -375,35 +381,40 @@ class BinanceClient:
         return
     
     def _process_dicision(self, strategy: 'Strategy', decision: str, latest_price: float):
-        if 'buy' in decision and not strategy.had_assits:
-            # Binance don't allow less than 10$ transaction
-            min_qty_margin = max(10 / latest_price, strategy.contract.minQuantity)
-            # USDT or BUSD, etc..
-            base_asset = strategy.contract.quoteAsset
-            # get the balance information
-            balance = self.balance[base_asset] 
-            # Calculate the desired money for trade
-            buy_margin = balance.availableBalance * strategy.buy_pct
-            # calculate order quantity and apply 5% negative slippage
-            quantity_margin = (buy_margin/latest_price) * 0.95
-            quantity_margin = round(quantity_margin ,
-                                    strategy.contract.quantityPrecision)
-            
-            if quantity_margin > min_qty_margin:
-                order = self._make_order(strategy.contract, order_side='BUY',
-                                                  order_type='MARKET', quantity=quantity_margin)
-                if order:
-                    strategy.order = order
-                    strategy.had_assits = True
-                    self.logger.info(f"""
-                          {strategy.order.symbol} buying order was made.
-                          Quantity: {strategy.order.quantity}. 
-                          Price: {strategy.order.price}
-                          """)
+        if decision == "buy or hodl":
+            if not strategy.had_assits:
+                # Binance don't allow less than 10$ transaction
+                min_qty_margin = max(10 / latest_price, strategy.contract.minQuantity)
+                # USDT or BUSD, etc..
+                base_asset = strategy.contract.quoteAsset
+                # get the balance information
+                balance = self.balance[base_asset] 
+                # Calculate the desired money for trade
+                buy_margin = balance.availableBalance * strategy.buy_pct
+                # calculate order quantity and apply 5% negative slippage
+                quantity_margin = (buy_margin/latest_price) * 0.95
+                quantity_margin = round(quantity_margin ,
+                                        strategy.contract.quantityPrecision)
+                
+                if quantity_margin > min_qty_margin:
+                    order = self._make_order(strategy.contract, order_side='BUY',
+                                             order_type='MARKET', quantity=quantity_margin)
+                    if order:
+                        strategy.order = order
+                        strategy.had_assits = True
+                        self.logger.info(f"{strategy.order.symbol} buying order was made. "
+                                         f"Quantity: {strategy.order.quantity}. "
+                                         f"Price: {strategy.order.price}")
+                else:
+                    self.logger.info(f"could not buy {self.strategy.contract.symbol}"
+                                     "because the ordered quantity is less than the minimum margin")
             else:
-                self.logger.info(f"{self.strategy.contract.symbol} buying option could not be made because the ordered quantity is less than the minimum margin")
-        
-        elif 'sell' in decision.lower() and strategy.had_assits:
+                pass # HODLE
+            
+        elif decision == "sell or don't enter":
+            if strategy.had_assits:
                 # If there is an existing order and indicators are not good, SELL
                 self._sell_strategy_asset(strategy)
+            else:
+                pass #Do not enter
         return
