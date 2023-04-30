@@ -172,7 +172,7 @@ class BinanceClient:
         return None
 
     ########################## TRADE Arguments ##########################
-    def _make_order(self, contract: Contract, order_side: str, order_type: str, **kwargs) -> Order | None:
+    def make_order(self, contract: Contract, order_side: str, order_type: str, **kwargs) -> Order | None:
         """Make a Buy/Long or Sell/Short order for a given contract. 
         This argument is a private argument and can only be accesed within the connecter,
         when a buying or selling signal is found, or when canceling the runnning strategy"""
@@ -308,7 +308,7 @@ class BinanceClient:
             return
         elif channel == "aggTrade":
             symbol = strategy.symbol
-            self.running_startegies.pop(strategy)
+            self.running_startegies.pop(f"{symbol}_{strategy.strategy_id}")
             self.strategy_counter[symbol]['count'] -= 1
             if self.strategy_counter[symbol]['count'] == 0:
                 params = [f"{symbol.lower()}@{channel}"]
@@ -329,10 +329,17 @@ class BinanceClient:
         # Update ask/bid prices
         self.prices[symbol].bid = float(data["b"])
         self.prices[symbol].ask = float(data["a"])
-        for strategy in self.running_startegies:
-            if symbol == strategy.symbol and strategy.had_assits:
-                # Calculate the uPnL only when an order is made
-                self._check_tp_sl(strategy)
+        for strategy in self.running_startegies.values():
+            if symbol == strategy.symbol and hasattr(strategy, 'order'):
+                # Check the order status
+                if strategy.order.status in ['NEW', 'PARTIALLY_FILLED']:
+                    strategy.order = self.order_status(strategy.order)
+                elif strategy.order.status in ['CANCELED', 'REJECTED', 'EXPIRED']:
+                    self.unsubscribe_channel(channel='aggTrade', strategy=strategy)
+                    continue
+                if strategy.order.status == 'FILLED':
+                    # Calculate the uPnL only when an order is made
+                    self._check_tp_sl(strategy)
         return
     
     def _check_tp_sl(self, strategy: 'Strategy'):
@@ -344,7 +351,7 @@ class BinanceClient:
         return
 
     def _sell_strategy_asset(self, strategy):
-        sell_order = self._make_order(self.contracts[strategy.contract.symbol], 'SELL',
+        sell_order = self.make_order(self.contracts[strategy.contract.symbol], 'SELL',
                                       order_type='MARKET', quantity=strategy.order.quantity)
         if sell_order:
             strategy.order = sell_order
@@ -369,7 +376,7 @@ class BinanceClient:
         trade_price = float(data['p'])
         volume = float(data['q'])
         timestamp = int(data['T'])
-        for strategy in self.running_startegies:
+        for strategy in self.running_startegies.values():
             if strategy.is_running:
                 if symbol==strategy.contract.symbol:
                     decision = strategy.parse_trade(trade_price, 
@@ -397,7 +404,7 @@ class BinanceClient:
                                         strategy.contract.quantityPrecision)
                 
                 if quantity_margin > min_qty_margin:
-                    order = self._make_order(strategy.contract, order_side='BUY',
+                    order = self.make_order(strategy.contract, order_side='BUY',
                                              order_type='MARKET', quantity=quantity_margin)
                     if order:
                         strategy.order = order

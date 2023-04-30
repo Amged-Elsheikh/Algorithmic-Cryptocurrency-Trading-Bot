@@ -63,6 +63,12 @@ def update_strategy_table(prev_data, n, data):
         strategy_id = removed_row['ID']
         strategy = clients[exchange].running_startegies[f"{symbol}_{strategy_id}"]
         clients[exchange].unsubscribe_channel(strategy=strategy, channel="aggTrade")
+        strategy.order = clients[exchange].make_order(
+            contract=strategy.contract,
+            order_side="SELL",
+            order_type='MARKET',
+            quantity=strategy.order.quantity)
+        
     else:
         data = []
         for client in clients.values():
