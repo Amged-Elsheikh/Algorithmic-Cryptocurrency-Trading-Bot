@@ -5,9 +5,9 @@ import logging
 import logging.config
 import os
 import time
-from collections import defaultdict
+from collections import defaultdict, deque, namedtuple
 from threading import Thread
-from typing import TYPE_CHECKING, Dict, List, Set, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 from urllib.parse import urlencode
 
 import requests
@@ -42,9 +42,16 @@ class BinanceClient:
                            "DELETE": requests.delete}
         logging.config.fileConfig("logger.config")
         self.logger = logging.getLogger(__name__)
+        self.log_map = {
+            'debug': self.logger.debug,
+            'info': self.logger.info,
+            'warning': self.logger.warning,
+            'error': self.logger.error}
         # Check internet connection
+        self.log_queue = deque()
+        self._queue_tuple = namedtuple("Logs", "msg, level")
         self._check_internet_connection()
-        self.logger.info("Internet connection established")
+        
         self.contracts = self._get_contracts()
         self.prices = defaultdict(Price)
 
@@ -105,11 +112,13 @@ class BinanceClient:
         while not self._is_connected:
             if connection_flag >= 5:
                 msg = "Binance Client failed to connect"
-                self.logger.warning(msg)
+                self.add_log(msg=msg, level='warning')
                 raise Exception(msg)
             else:
                 connection_flag += 1
                 time.sleep(3)
+        msg = "Internet connection established"
+        self.add_log(msg=msg, level='info')
         return True
         
     @property
@@ -129,9 +138,9 @@ class BinanceClient:
             response.raise_for_status()
             return response
         except RequestException as e:
-            self.logger.warning(f"Request error {e}")
+            self.add_log(msg=f"Request error {e}", level='warning')
         except Exception as e:
-            self.logger.error(f"Error: {e}")
+            self.add_log(msg=f"Error {e}", level='error')
         return None
 
     def _generate_signature(self, query_string: str):
@@ -219,7 +228,7 @@ class BinanceClient:
 
     @balance.setter
     def balance(self, *args, **kwargs):
-        self.logger.warning("Balance can't be edited manually")
+        self.add_log(msg="Balance can't be edited manually", level='warning')
         return self.balance
 
     ############################ Websocket Arguments ############################
@@ -237,19 +246,19 @@ class BinanceClient:
                     break
             except Exception as e:
                 # Update the log about this error
-                self.logger.warning("Binance error in run_forever() method: %s", e)
+                self.add_log(msg=f"Binance error in run_forever() method: {e}", level='warning')
             # Add sleeping interval
             time.sleep(3)
 
     def _on_open(self, ws: websocket.WebSocketApp):
-        self.logger.info("Websocket connected")
+        self.add_log(msg="Websocket connected", level='info')
                 
     def _on_error(self, ws: websocket.WebSocketApp, error):
-        self.logger.error(f"Error: {error}")
+        self.add_log(msg=f"Error: {error}", level='error')
 
     def _on_close(self, ws: websocket.WebSocketApp):
         self._ws_connect = False
-        self.logger.info("Websocket disconnect")
+        self.add_log(msg="Websocket disconnect", level='info')
         
     def _on_message(self, ws: websocket.WebSocketApp, msg):
         """This is the argument that will form most of the connections between the backend and frontend 
@@ -268,7 +277,7 @@ class BinanceClient:
         params = f"{symbol.lower()}@{channel}"
         if channel == "bookTicker":
             if self.contracts[symbol] in self.bookTicker_subscribtion_list:
-                self.logger.info(f"Already subscribed to {params} channel")
+                self.add_log(msg=f"Already subscribed to {params} channel", level='info')
             else:
                 msg = {"method": "SUBSCRIBE", "params": [params], "id": self.id}
                 # immediatly show current bid and ask prices.
@@ -285,7 +294,7 @@ class BinanceClient:
                 
             if symbol in self.strategy_counter.keys():
                 self.strategy_counter[symbol]['count'] += 1
-                self.logger.info(f"Already subscribed to {params} channel")
+                self.add_log(msg=f"Already subscribed to {params} channel", level='info')
             else:
                 msg = {"method": "SUBSCRIBE", "params": [params], "id": self.id}
                 # Subscribe to the websocket channel
@@ -409,12 +418,14 @@ class BinanceClient:
                     if order:
                         strategy.order = order
                         strategy.had_assits = True
-                        self.logger.info(f"{strategy.order.symbol} buying order was made. "
-                                         f"Quantity: {strategy.order.quantity}. "
-                                         f"Price: {strategy.order.price}")
+                        msg = (f"{strategy.order.symbol} buying order was made. "
+                               f"Quantity: {strategy.order.quantity}. "
+                               f"Price: {strategy.order.price}")
+                        self.add_log(msg=msg, level='info')
                 else:
-                    self.logger.info(f"could not buy {self.strategy.contract.symbol}"
-                                     "because the ordered quantity is less than the minimum margin")
+                    msg = (f"could not buy {self.strategy.contract.symbol}"
+                           "because the ordered quantity is less than the minimum margin")
+                    self.add_log(msg=msg, level='info')
             else:
                 pass # HODLE
             
@@ -425,3 +436,8 @@ class BinanceClient:
             else:
                 pass #Do not enter
         return
+
+    def add_log(self, msg: str, level: str):
+        self.log_map[level.lower()](msg)
+        msg = f"{self.exchange} Connector: {msg}"
+        self.log_queue.append(self._queue_tuple(msg, level))
