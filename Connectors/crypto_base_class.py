@@ -16,38 +16,38 @@ if TYPE_CHECKING:
 
 class CryptoExchange(ABC):
     def __init__(self):
-        self._queue_tuple = namedtuple("Logs", "msg, level")
+        self._queue_tuple = namedtuple('Logs', 'msg, level')
         self.logger: logging.Logger
         self.log_map = {
-            "debug": self.logger.debug,
-            "info": self.logger.info,
-            "warning": self.logger.warning,
-            "error": self.logger.error,
+            'debug': self.logger.debug,
+            'info': self.logger.info,
+            'warning': self.logger.warning,
+            'error': self.logger.error,
         }
         self.log_queue = deque()
-        self._queue_tuple = namedtuple("Logs", "msg, level")
+        self._queue_tuple = namedtuple('Logs', 'msg, level')
         # Websocket connection
         self._ws_connect = False
         self.id = 1
         self.bookTicker_subscribtion_list: Dict[Contract, int] = dict()
-        """
-        running_startegies key: "symbol_id".\n
+        '''
+        running_startegies key: 'symbol_id'.\n
         value: strategy object, to be used later in the UI
-        """
+        '''
         self.running_startegies: Dict[str, Strategy] = dict()
-        """
+        '''
         A single contract can have multiple running strategies.
         key: symbol_id\n,
         value: strategy object, to be used later in the UI
-        """
+        '''
         self.strategy_counter: Dict[str, Dict[str, int]] = dict()
-        """
+        '''
         when a new strategyy added, the counter will increase, and when
         strategy is executed/canceled, counter will go down. Once counter
         reach Zero, unsubscribe the aggTrade channel. The first key is the
         symbol, and the item is another dictionary. For the 2nd dict,
         the keys are the counter 'count' and the 'id' for the web socket
-        """
+        '''
 
     @abstractproperty
     def exchange(self) -> str:
@@ -108,7 +108,7 @@ class CryptoExchange(ABC):
 
     @balance.setter
     def balance(self, *args, **kwargs) -> Dict[str, Balance]:
-        self.add_log(msg="Balance can't be edited manually", level="warning")
+        self.add_log(msg="Balance can't be edited manually", level='warning')
         return self.balance
 
     def _start_ws(self):
@@ -130,21 +130,21 @@ class CryptoExchange(ABC):
             except Exception as e:
                 # Update the log about this error
                 self.add_log(
-                    msg=f"{self.exchange} error in run_forever() method: {e}",
-                    level="warning",
+                    msg=f'{self.exchange} error in run_forever() method: {e}',
+                    level='warning',
                 )
             # Add sleeping interval
             time.sleep(3)
 
     def _on_open(self, ws: websocket.WebSocketApp):
-        self.add_log(msg="Websocket connected", level="info")
+        self.add_log(msg='Websocket connected', level='info')
 
     def _on_error(self, ws: websocket.WebSocketApp, error):
-        self.add_log(msg=f"Error: {error}", level="error")
+        self.add_log(msg=f'Error: {error}', level='error')
 
     def _on_close(self, ws: websocket.WebSocketApp):
         self._ws_connect = False
-        self.add_log(msg="Websocket disconnect", level="info")
+        self.add_log(msg='Websocket disconnect', level='info')
 
     @abstractmethod
     def _ws_on_message(self, ws: websocket.WebSocketApp, msg):
@@ -152,7 +152,7 @@ class CryptoExchange(ABC):
 
     def add_log(self, msg: str, level: str):
         self.log_map[level.lower()](msg)
-        msg = f"{self.exchange} Connector: {msg}"
+        msg = f'{self.exchange} Connector: {msg}'
         self.log_queue.append(self._queue_tuple(msg, level))
 
     # ########################### Websocket Arguments ########################
@@ -165,15 +165,15 @@ class CryptoExchange(ABC):
     @abstractmethod
     def unsubscribe_channel(
         self,
-        channel="bookTicker",
+        channel='bookTicker',
         *,
         symbol: Union[str, None] = None,
-        strategy: Union["Strategy", None] = None,
+        strategy: Union['Strategy', None] = None,
     ) -> None:
         pass
 
     # ########################### Strategy Arguments ##########################
-    def _check_tp_sl(self, strategy: "Strategy"):
+    def _check_tp_sl(self, strategy: 'Strategy'):
         buying_price = strategy.order.price
         strategy.uPnl = self.prices[strategy.symbol].ask / buying_price - 1
         strategy.uPnl *= 100
@@ -184,10 +184,10 @@ class CryptoExchange(ABC):
 
     @abstractmethod
     def _process_dicision(
-        self, strategy: "Strategy", decision: str, latest_price: float
+        self, strategy: 'Strategy', decision: str, latest_price: float
     ):
         pass
 
     @abstractmethod
-    def _sell_strategy_asset(self, strategy: "Strategy"):
+    def _sell_strategy_asset(self, strategy: 'Strategy'):
         pass

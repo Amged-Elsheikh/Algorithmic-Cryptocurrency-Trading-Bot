@@ -10,11 +10,11 @@ from app import clients
 
 
 LOGS_COLOR_MAP = {
-    "debug": "primary",
-    "info": "info",
-    "warning": "warning",
-    "error": "secondary",
-    "critical": "danger",
+    'debug': 'primary',
+    'info': 'info',
+    'warning': 'warning',
+    'error': 'secondary',
+    'critical': 'danger',
 }
 
 
@@ -25,8 +25,8 @@ def get_removed_row(prev_data, data):
 
 
 @callback(
-    Output("websocket-init", "disabled"),
-    Input("websocket-init", "n_intervals"),
+    Output('websocket-init', 'disabled'),
+    Input('websocket-init', 'n_intervals'),
     prevent_initial_call=True,
 )
 def start_websockets(*args):
@@ -35,27 +35,27 @@ def start_websockets(*args):
     return True
 
 
-@callback(Output("watchlist-select", "value"),
-          Input("watchlist-select", "value"))
+@callback(Output('watchlist-select', 'value'),
+          Input('watchlist-select', 'value'))
 def subscribe_to_new_stream(value: str):
     if value:
-        exchange, symbol = value.split(" ")
-        clients[exchange].new_subscribe(channel="bookTicker", symbol=symbol)
+        exchange, symbol = value.split(' ')
+        clients[exchange].new_subscribe(channel='bookTicker', symbol=symbol)
     return None
 
 
 @callback(
-    Output("watchlist-table", "data"),
-    Input("watchlist-table", "data_previous"),
-    Input("update-interval", "n_intervals"),
-    State("watchlist-table", "data"),
+    Output('watchlist-table', 'data'),
+    Input('watchlist-table', 'data_previous'),
+    Input('update-interval', 'n_intervals'),
+    State('watchlist-table', 'data'),
 )
 def update_watchlist_table(prev_data, n, data):
-    if ctx.triggered_id == "watchlist-table":
+    if ctx.triggered_id == 'watchlist-table':
         removed_row = get_removed_row(prev_data, data)
-        client = clients[removed_row["Exchange"]]
-        symbol = removed_row["Symbol"]
-        client.unsubscribe_channel(channel="bookTicker", symbol=symbol)
+        client = clients[removed_row['Exchange']]
+        symbol = removed_row['Symbol']
+        client.unsubscribe_channel(channel='bookTicker', symbol=symbol)
         # After unsubscribing, the Backend will manage to remove from the UI
     else:
         data = []
@@ -63,34 +63,34 @@ def update_watchlist_table(prev_data, n, data):
             for price in client.prices.values():
                 data.append(
                     {
-                        "Symbol": price.symbol,
-                        "Exchange": price.exchange,
-                        "bidPrice": price.bid,
-                        "askPrice": price.ask,
+                        'Symbol': price.symbol,
+                        'Exchange': price.exchange,
+                        'bidPrice': price.bid,
+                        'askPrice': price.ask,
                     }
                 )
     return data
 
 
 @callback(
-    Output("uPnl-table", "data"),
-    Input("uPnl-table", "data_previous"),
-    Input("update-interval", "n_intervals"),
-    State("uPnl-table", "data"),
+    Output('uPnl-table', 'data'),
+    Input('uPnl-table', 'data_previous'),
+    Input('update-interval', 'n_intervals'),
+    State('uPnl-table', 'data'),
 )
 def update_strategy_table(prev_data, n, data):
-    if ctx.triggered_id == "uPnl-table":
+    if ctx.triggered_id == 'uPnl-table':
         removed_row = get_removed_row(prev_data, data)
-        client = clients[removed_row["Exchange"]]
-        symbol = removed_row["Symbol"]
-        strategy_id = removed_row["ID"]
-        strategy = client.running_startegies[f"{symbol}_{strategy_id}"]
-        client.unsubscribe_channel(channel="aggTrade", strategy=strategy)
-        if hasattr(strategy, "order"):
+        client = clients[removed_row['Exchange']]
+        symbol = removed_row['Symbol']
+        strategy_id = removed_row['ID']
+        strategy = client.running_startegies[f'{symbol}_{strategy_id}']
+        client.unsubscribe_channel(channel='aggTrade', strategy=strategy)
+        if hasattr(strategy, 'order'):
             strategy.order = client.make_order(
                 contract=strategy.contract,
-                side="SELL",
-                order_type="MARKET",
+                side='SELL',
+                order_type='MARKET',
                 quantity=strategy.order.quantity,
             )
     else:
@@ -99,36 +99,36 @@ def update_strategy_table(prev_data, n, data):
             for strategy in client.running_startegies.values():
                 data.append(
                     {
-                        "ID": strategy.strategy_id,
-                        "Exchange": strategy.client.exchange,
-                        "Symbol": strategy.symbol,
-                        "Qty": (strategy.order.quantity
+                        'ID': strategy.strategy_id,
+                        'Exchange': strategy.client.exchange,
+                        'Symbol': strategy.symbol,
+                        'Qty': (strategy.order.quantity
                                 if strategy.had_assits else 0),
-                        "Entry Price": (
+                        'Entry Price': (
                             strategy.order.price if strategy.had_assits else 0
                         ),
-                        "Current Price": client.prices[strategy.symbol].bid,
-                        "uPnl": f"{strategy.unpnl*100}%",
+                        'Current Price': client.prices[strategy.symbol].bid,
+                        'uPnl': f'{strategy.unpnl*100}%',
                     }
                 )
     return data
 
 
 @callback(
-    Output("strategy-contracts-dropdown", "value"),
-    Input("add-strategy-btn", "n_clicks"),
-    State("strategy-contracts-dropdown", "value"),
-    State("entry-pct", "value"),
-    State("take-profit", "value"),
-    State("stop-loss", "value"),
-    State("interval-dropdown", "value"),
-    State("strategy-type-select", "value"),
-    State("fast-ema", "value"),
-    State("slow-ema", "value"),
-    State("fast-macd", "value"),
-    State("slow-macd", "value"),
-    State("macd-signal", "value"),
-    State("rsi-period", "value"),
+    Output('strategy-contracts-dropdown', 'value'),
+    Input('add-strategy-btn', 'n_clicks'),
+    State('strategy-contracts-dropdown', 'value'),
+    State('entry-pct', 'value'),
+    State('take-profit', 'value'),
+    State('stop-loss', 'value'),
+    State('interval-dropdown', 'value'),
+    State('strategy-type-select', 'value'),
+    State('fast-ema', 'value'),
+    State('slow-ema', 'value'),
+    State('fast-macd', 'value'),
+    State('slow-macd', 'value'),
+    State('macd-signal', 'value'),
+    State('rsi-period', 'value'),
     prevent_initial_call=True,
 )
 def start_strategy(
@@ -146,10 +146,10 @@ def start_strategy(
     macd_signal,
     rsi,
 ):
-    if strategy_type == "Technical":
-        ema = {"fast": fast_ema, "slow": slow_ema}
-        macd = {"fast": fast_macd, "slow": slow_macd, "signal": macd_signal}
-        exchange, symbol = contract.split(" ")
+    if strategy_type == 'Technical':
+        ema = {'fast': fast_ema, 'slow': slow_ema}
+        macd = {'fast': fast_macd, 'slow': slow_macd, 'signal': macd_signal}
+        exchange, symbol = contract.split(' ')
         TechnicalStrategies(
             client=clients[exchange],
             symbol=symbol,
@@ -165,9 +165,9 @@ def start_strategy(
 
 
 @callback(
-    Output("logs-list", "children"),
-    Input("update-interval", "n_intervals"),
-    State("logs-list", "children"),
+    Output('logs-list', 'children'),
+    Input('update-interval', 'n_intervals'),
+    State('logs-list', 'children'),
 )
 def update_log_list(n, logs_list: List):
     no_logs_count = 0

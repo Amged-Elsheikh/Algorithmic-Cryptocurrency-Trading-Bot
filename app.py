@@ -8,7 +8,7 @@ from dashboard.dashboard_ui import (nav_bar, upper_container, middel_container,
                                     bottom_container, footer, technical_modal)
 
 
-clients = {"Binance": BinanceClient(is_spot=False, is_test=True)}
+clients = {'Binance': BinanceClient(is_spot=False, is_test=True)}
 
 
 def main(clients: Dict[str, CryptoExchange]):
@@ -16,7 +16,7 @@ def main(clients: Dict[str, CryptoExchange]):
         dbc.themes.BOOTSTRAP,
         dbc.icons.BOOTSTRAP,
         dbc.icons.FONT_AWESOME,
-        "style.css",
+        'style.css',
     ]
 
     app = Dash(external_stylesheets=external_stylesheets)
@@ -30,17 +30,17 @@ def main(clients: Dict[str, CryptoExchange]):
                     bottom_container(),
                     footer(),
                     technical_modal(),
-                    dcc.Interval(id="update-interval", interval=1000),
-                    dcc.Interval(id="websocket-init", max_intervals=1),
+                    dcc.Interval(id='update-interval', interval=1000),
+                    dcc.Interval(id='websocket-init', max_intervals=1),
                 ],
-                className="body-container",
+                className='body-container',
             ),
         ]
     )
     return app
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app = main(clients)
     from dashboard.dashboard_callbacks import *
     app.run(debug=True, use_reloader=False)
