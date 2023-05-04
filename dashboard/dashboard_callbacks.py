@@ -1,15 +1,28 @@
-from dash import Input, Output, State, callback, ctx
+from collections import deque
+from typing import List
+from dash import Input, Output, State, callback, ctx, no_update
+import dash_bootstrap_components as dbc
 
 from strategies import TechnicalStrategies
 from Moduls.data_modul import Contract
-from app import clients # This import is causing conflicts. App is workin, but need to be fixed
+# This import is causing conflicts. App is workin, but need to be fixed
 
+from app import clients
+
+
+LOGS_COLOR_MAP = {
+    "debug": "primary",
+    "info": "info",
+    "warning": "warning",
+    "error": "secondary",
+    "critical": "danger"
+    }
 
 def get_removed_row(prev_data, data):
     for item in prev_data:
         if item not in data:
             return item
-        
+      
 
 @callback(Output(component_id="websocket-init", component_property="disabled"),
           Input(component_id="websocket-init", component_property="n_intervals"),
@@ -118,3 +131,23 @@ def start_strategy(n_click, contract: Contract, buy_pct,
                             buy_pct=buy_pct, ema=ema, macd=macd,
                             rsi=rsi)
     return None
+
+
+@callback(Output(component_id='logs-list', component_property='children'),
+          Input(component_id='update-interval', component_property='n_intervals'),
+          State(component_id='logs-list', component_property='children'))
+def update_log_list(n, logs_list: List):
+    no_logs_count = 0
+    for client in clients.values():
+        new_logs = client.log_queue
+        if len(new_logs) == 0:
+            no_logs_count += 1
+            continue
+        while new_logs:
+            log = new_logs.pop()
+            logs_list.append(dbc.ListGroupItem(
+                log.msg, color=LOGS_COLOR_MAP[log.level])
+                             )
+    if no_logs_count == len(clients):
+        return no_update
+    return logs_list

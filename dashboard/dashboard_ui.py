@@ -210,13 +210,13 @@ def technical_modal():
         return indicator_component
     
     ema_component = technicl_modal_component(
-        'EMA', {'fast EMA':9, 'slow EMA':25}
+        'EMA', {'fast EMA': 9, 'slow EMA': 25}
         )
     macd_component = technicl_modal_component(
-        "MACD", {"fast MACD":12, "slow MACD":26, "MACD signal":9}
+        "MACD", {"fast MACD": 12, "slow MACD": 26, "MACD signal": 9}
         )
     rsi_component = technicl_modal_component(
-        "RSI", {"RSI period":12}
+        "RSI", {"RSI period": 12}
     )
     
     modal = dbc.Modal([
@@ -229,13 +229,25 @@ def technical_modal():
     return modal
 
 
+def log_container():
+    container = dbc.Row([
+        dbc.Col([
+            html.H3("Logs"),
+            html.Div([
+                dbc.ListGroup(children=[], className="logs-list")
+            ], className="logs-container text-justify")
+        ], className="col-5", id="left-window-lower")
+    ], className="pt-3 container-fluid", id="bottom-container")
+    return container
+
+
 @dash.callback(Output(component_id="technical-modal", component_property="is_open"),
           Input(component_id="technical-modal-close", component_property="n_clicks"),
           Input(component_id="extra-param-btn", component_property="n_clicks"),
           State(component_id="strategy-type-select", component_property="value"),
           State(component_id="technical-modal", component_property="is_open"))
 def open_modal(close_btn, open_btn, strategy: str, modal_state: bool):
-    if open_btn==0:
+    if open_btn == 0:
         return False
     elif modal_state:
         return False

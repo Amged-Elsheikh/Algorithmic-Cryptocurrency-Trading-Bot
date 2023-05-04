@@ -29,6 +29,7 @@ html, body {
 }
 
 .logs-list {
+    height:13rem;
     overflow-y: scroll
 }
 
