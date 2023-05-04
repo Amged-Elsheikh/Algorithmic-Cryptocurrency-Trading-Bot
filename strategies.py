@@ -42,7 +42,7 @@ class Strategy(ABC):
         self.contract = self.client.contracts[symbol]
         self.timeframe = intervals_to_sec[interval] * 1000
 
-        self.client.new_subscribe(self.symbol, "aggTrade")
+        self.client.new_subscribe(channel="aggTrade", symbol=self.symbol)
         self.client.logger.info("Strategy added succesfully.")
         self.id = self.client.strategy_counter[self.symbol]["id"]
         self.strategy_id = Strategy.new_strategy_id

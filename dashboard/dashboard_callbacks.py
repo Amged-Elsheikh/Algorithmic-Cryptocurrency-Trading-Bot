@@ -40,7 +40,7 @@ def start_websockets(*args):
 def subscribe_to_new_stream(value: str):
     if value:
         exchange, symbol = value.split(" ")
-        clients[exchange].new_subscribe(symbol, channel="bookTicker")
+        clients[exchange].new_subscribe(channel="bookTicker", symbol=symbol)
     return None
 
 
@@ -53,9 +53,9 @@ def subscribe_to_new_stream(value: str):
 def update_watchlist_table(prev_data, n, data):
     if ctx.triggered_id == "watchlist-table":
         removed_row = get_removed_row(prev_data, data)
-        exchange = removed_row["Exchange"]
+        client = clients[removed_row["Exchange"]]
         symbol = removed_row["Symbol"]
-        clients[exchange].unsubscribe_channel(symbol, "bookTicker")
+        client.unsubscribe_channel(channel="bookTicker", symbol=symbol)
         # After unsubscribing, the Backend will manage to remove from the UI
     else:
         data = []
@@ -81,18 +81,18 @@ def update_watchlist_table(prev_data, n, data):
 def update_strategy_table(prev_data, n, data):
     if ctx.triggered_id == "uPnl-table":
         removed_row = get_removed_row(prev_data, data)
+        client = clients[removed_row["Exchange"]]
         symbol = removed_row["Symbol"]
         strategy_id = removed_row["ID"]
-        client = clients["Exchange"]
         strategy = client.running_startegies[f"{symbol}_{strategy_id}"]
-        client.unsubscribe_channel(strategy=strategy, channel="aggTrade")
-        strategy.order = client.make_order(
-            contract=strategy.contract,
-            order_side="SELL",
-            order_type="MARKET",
-            quantity=strategy.order.quantity,
-        )
-
+        client.unsubscribe_channel(channel="aggTrade", strategy=strategy)
+        if hasattr(strategy, "order"):
+            strategy.order = client.make_order(
+                contract=strategy.contract,
+                side="SELL",
+                order_type="MARKET",
+                quantity=strategy.order.quantity,
+            )
     else:
         data = []
         for client in clients.values():

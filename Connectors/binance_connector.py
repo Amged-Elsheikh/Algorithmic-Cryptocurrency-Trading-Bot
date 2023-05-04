@@ -5,9 +5,7 @@ import logging
 import logging.config
 import os
 import time
-from collections import defaultdict, deque, namedtuple
-from threading import Thread
-from typing import TYPE_CHECKING, Dict, List, Union
+from typing import TYPE_CHECKING, Callable, Dict, Union
 from urllib.parse import urlencode
 
 import requests
@@ -16,16 +14,23 @@ from dotenv import load_dotenv
 from requests.exceptions import RequestException
 from requests.models import Response
 
+from Connectors.crypto_base_class import CryptoExchange
 from Moduls.data_modul import Balance, CandleStick, Contract, Order, Price
 
 if TYPE_CHECKING:
     from strategies import Strategy
 
 load_dotenv()
+logging.config.fileConfig("logger.config")
 
 
-class BinanceClient:
-    _loaded = {}
+class BinanceClient(CryptoExchange):
+    _http_dict: Dict[str, Callable] = {
+            "GET": requests.get,
+            "POST": requests.post,
+            "DELETE": requests.delete
+            }
+    _loaded = dict()
 
     def __new__(cls, is_spot: bool, is_test: bool):
         if (client := cls._loaded.get(f"{is_spot} {is_test}")) is None:
@@ -39,92 +44,47 @@ class BinanceClient:
             "X-MBX-APIKEY": os.getenv(self._api_key),
             "Content-Type": "application/json",
         }
-
-        self._http_dict = {
-            "GET": requests.get,
-            "POST": requests.post,
-            "DELETE": requests.delete,
-        }
-        logging.config.fileConfig("logger.config")
         self.logger = logging.getLogger(__name__)
-        self.log_map = {
-            "debug": self.logger.debug,
-            "info": self.logger.info,
-            "warning": self.logger.warning,
-            "error": self.logger.error,
-        }
-        # Check internet connection
-        self.log_queue = deque()
-        self._queue_tuple = namedtuple("Logs", "msg, level")
+        super().__init__()
         self._check_internet_connection()
         self.contracts = self._get_contracts()
-        self.prices = defaultdict(Price)
-        # Websocket connection
-        self._ws_connect = False
-        self.id = 1
-        self.bookTicker_subscribtion_list: Dict[Contract, int] = dict()
-        # running_startegies key: "symbol_id", value: strategy object, to be
-        # used later in the UI
-        self.running_startegies: Dict[str, Strategy] = {}
-        """
-        Can't a dictionary, because a single contract can have multiple
-        running strategies. running_startegies key: "symbol_id",
-        value: strategy object, to be used later in the UI
-        """
-        self.strategy_counter: Dict[str, Dict[str, int]] = dict()
-        """
-        when a new strategyy added, the counter will increase, and when
-        strategy is executed/canceled, counter will go down. Once counter
-        reach Zero, unsubscribe the aggTrade channel. The first key is the
-        symbol, and the item is another dictionary. For the 2nd dict,
-        the keys are the counter 'count' and the 'id' for the web socket
-        """
-
-    def run(self):
-        self._ws_connect = True
-        t = Thread(target=self._start_ws)
-        t.start()
+        self.prices: Dict[str, Price] = dict()
 
     def _init(self, is_spot: bool, is_test: bool):
-        # Spot Trading
-        # Test Net
-        if is_spot and is_test:
-            self._base_url = "https://testnet.binance.vision/api"
-            self._ws_url = "wss://testnet.binance.vision/ws"
-        # Real Spot trading
-        elif is_spot and not is_test:
-            self._base_url = "https://api.binance.com/api"
-            self._ws_url = "wss://stream.binance.com:9443/ws"
-        # Future Trading
-        # Test net
-        elif not is_spot and is_test:
-            self._base_url = "https://testnet.binancefuture.com"
-            self._ws_url = "wss://stream.binancefuture.com/ws"
-        # Real Future
-        elif not is_spot and not is_test:
-            self._base_url = "https://fapi.binance.com"
-            self._ws_url = "wss://fstream.binance.com/ws"
-        self._api_key = (
-            f"Binance{'Spot' if is_spot else 'Future'}"
-            f"{'Test' if is_test else ''}APIKey"
-        )
+        urls = {
+            (True, True): ("https://testnet.binance.vision/api",
+                           "wss://testnet.binance.vision/ws"),
+            (True, False): ("https://api.binance.com/api",
+                            "wss://stream.binance.com:9443/ws"),
+            (False, True): ("https://testnet.binancefuture.com",
+                            "wss://stream.binancefuture.com/ws"),
+            (False, False): ("https://fapi.binance.com",
+                             "wss://fstream.binance.com/ws"),
+            }
+        self._base_url, self._ws_url = urls[(is_spot, is_test)]
+        spot_future = 'Spot' if is_spot else 'Future'
+        real_test = 'Test' if is_test else ''
+        self._api_key = f"{self.exchange}{spot_future}{real_test}APIKey"
         self._api_secret = self._api_key.replace("APIKey", "APISecret")
 
     @property
     def _is_connected(self):
         response = self._execute_request(
-            endpoint="/fapi/v1/ping", params={}, http_method="GET"
-        )
-        if response:
+            endpoint="/fapi/v1/ping",
+            params=dict(),
+            http_method="GET"
+            )
+        try:
+            response.raise_for_status()
             return True
-        else:
+        except Exception:
             return False
 
     def _check_internet_connection(self):
         connection_flag = 0
         while not self._is_connected:
             if connection_flag >= 5:
-                msg = "Binance Client failed to connect"
+                msg = f"{self.exchange} Client failed to connect"
                 self.add_log(msg=msg, level="warning")
                 raise Exception(msg)
             else:
@@ -147,10 +107,12 @@ class BinanceClient:
             params["timestamp"] = int(time.time() * 1000)
             # Generate the signature for the query
             params["signature"] = self._generate_signature(urlencode(params))
-
-            response = self._http_dict[http_method](
-                self._base_url + endpoint, params=params, headers=self._header
-            )
+            http_method = self._http_dict[http_method]
+            response = http_method(
+                url=self._base_url + endpoint,
+                params=params,
+                headers=self._header
+                )
             response.raise_for_status()
             return response
         except RequestException as e:
@@ -161,17 +123,19 @@ class BinanceClient:
 
     def _generate_signature(self, query_string: str):
         return hmac.new(
-            os.getenv(self._api_secret).encode("utf-8"),
-            query_string.encode("utf-8"),
-            hashlib.sha256,
+            key=os.getenv(self._api_secret).encode("utf-8"),
+            msg=query_string.encode("utf-8"),
+            digestmod=hashlib.sha256,
         ).hexdigest()
 
     # ###################### MARKET DATA FUNCTION #######################
     def _get_contracts(self) -> Dict[str, Contract] | None:
         """Return all exchange contracts."""
         response = self._execute_request(
-            endpoint="/fapi/v1/exchangeInfo", params={}, http_method="GET"
-        )
+            endpoint="/fapi/v1/exchangeInfo",
+            params=dict(),
+            http_method="GET"
+            )
         if response:
             symbols = response.json()["symbols"]
             contracts = {
@@ -181,16 +145,18 @@ class BinanceClient:
             return contracts
         return None
 
-    def get_candlestick(
-        self, contract: Contract, interval="4h"
-    ) -> List[CandleStick] | None:
-        """Get a list of the historical Candlestickes for given contract."""
+    def get_candlestick(self, contract: Contract, interval: str):
+        """
+        Get a list of the historical Candlestickes for given contract.
+        """
         params = {"symbol": contract.symbol, "interval": interval}
         response = self._execute_request(
-            endpoint="/fapi/v1/klines", params=params, http_method="GET"
-        )
+            endpoint="/fapi/v1/klines",
+            params=params,
+            http_method="GET"
+            )
         if response:
-            return [CandleStick(candle, self.exchange)
+            return [CandleStick(candle, exchange=self.exchange)
                     for candle in response.json()]
         return None
 
@@ -203,40 +169,43 @@ class BinanceClient:
         )
         if response:
             self.prices[contract.symbol] = Price(response.json(),
-                                                 self.exchange)
-            price = self.prices[contract.symbol]
-            return price
+                                                 exchange=self.exchange)
+            return self.prices[contract.symbol]
         return None
 
     # ######################### TRADE Arguments ##########################
-    def make_order(
-        self, contract: Contract, order_side: str, order_type: str, **kwargs
-    ) -> Order | None:
+    def make_order(self, contract: Contract, *,
+                   side: str, order_type: str, **kwargs):
         """
         Make a Buy/Long or Sell/Short order for a given contract.
         This argument is a private argument and can only be accesed
         within the connecter, when a buying or selling signal is found,
-        or when canceling the runnning strategy"""
+        or when canceling the runnning strategy
+        """
         # Add the mandotary parameters
         params = {
             "symbol": contract.symbol,
-            "side": order_side,
+            "side": side,
             "type": order_type}
         # Add extra parameters
         params.update(kwargs)
         response = self._execute_request(
-            endpoint="/fapi/v1/order", params=params, http_method="POST"
-        )
+            endpoint="/fapi/v1/order",
+            params=params,
+            http_method="POST"
+            )
         if response:
             return Order(response.json(), exchange=self.exchange)
         return None
 
-    def order_status(self, order: Order) -> Order | None:
+    def order_status(self, order: Order):
         """Get information of a given order."""
         params = {"symbol": order.symbol, "orderId": order.orderId}
         response = self._execute_request(
-            endpoint="/fapi/v1/order", params=params, http_method="GET"
-        )
+            endpoint="/fapi/v1/order",
+            params=params,
+            http_method="GET"
+            )
         if response:
             return Order(response.json(), exchange=self.exchange)
         return None
@@ -258,17 +227,17 @@ class BinanceClient:
     # ######################### ACCOUNT Arguments ##########################
     @property
     def balance(self) -> Dict[str, Balance] | None:
-        """Return the amount of the currently holded assests in the wallet"""
-        endpoint = "/fapi/v2/account"
-        response = self._execute_request(endpoint,
-                                         http_method="GET",
-                                         params={}
-                                         )
+        """
+        Return the amount of the currently holded assests in the wallet
+        """
+        response = self._execute_request(
+            endpoint="/fapi/v2/account",
+            http_method="GET",
+            params=dict()
+            )
         if response:
-            balance: Dict[str, Balance]
-            data = response.json()["assets"]
-            balance = {asset["asset"]: Balance(asset, "Binance")
-                       for asset in data}
+            balance = {asset["asset"]: Balance(asset, exchange=self.exchange)
+                       for asset in response.json()["assets"]}
             return balance
         return None
 
@@ -278,182 +247,135 @@ class BinanceClient:
         return self.balance
 
     # ########################### Websocket Arguments ########################
-    def _start_ws(self):
-        self._ws = websocket.WebSocketApp(
-            self._ws_url,
-            on_open=self._on_open,
-            on_close=self._on_close,
-            on_error=self._on_error,
-            on_message=self._on_message,
-        )
-        # Reopen the websocket connection if it terminated
-        while True:
-            try:
-                if self._ws_connect:
-                    # Reconnect unless the interface is closed by the user
-                    self._ws.run_forever()
-                else:
-                    break
-            except Exception as e:
-                # Update the log about this error
-                self.add_log(
-                    msg=f"Binance error in run_forever() method: {e}",
-                    level="warning"
-                )
-            # Add sleeping interval
-            time.sleep(3)
-
-    def _on_open(self, ws: websocket.WebSocketApp):
-        self.add_log(msg="Websocket connected", level="info")
-
-    def _on_error(self, ws: websocket.WebSocketApp, error):
-        self.add_log(msg=f"Error: {error}", level="error")
-
-    def _on_close(self, ws: websocket.WebSocketApp):
-        self._ws_connect = False
-        self.add_log(msg="Websocket disconnect", level="info")
-
-    def _on_message(self, ws: websocket.WebSocketApp, msg):
+    def _ws_on_message(self, ws: websocket.WebSocketApp, msg):
         """
         This is the argument that will form most of the connections between
         the backend and frontend by automating trades and send data to the UI
         """
         # Read the received message
         data = json.loads(msg)
-        if "e" in data.keys():
-            symbol = data["s"]
-            if data["e"] == "bookTicker":
-                self._bookTickerMsg(data, symbol)
+        symbol = data.get('s')
+        channel = data.get('e')
+        if channel == "bookTicker":
+            self._bookTickerMsg(data, symbol)
+        elif channel == "aggTrade":
+            self._aggTradeMsg(data, symbol)
+        else:
+            return
 
-            elif data["e"] == "aggTrade":
-                self._aggTradeMsg(data, symbol)
-
-    def new_subscribe(self, symbol="BTCUSDT", channel="bookTicker"):
+    def new_subscribe(self, channel="bookTicker", symbol="BTCUSDT"):
         params = f"{symbol.lower()}@{channel}"
         contract = self.contracts[symbol]
         if channel == "bookTicker":
-            if contract in self.bookTicker_subscribtion_list:
-                self.add_log(
-                    msg=f"Already subscribed to {params} channel", level="info"
-                )
-            else:
-                msg = {
-                    "method": "SUBSCRIBE",
-                    "params": [params],
-                    "id": self.id}
-                # immediatly show current bid and ask prices.
-                self.get_price(contract)
-                # Subscribe to the websocket channel
-                self._ws.send(json.dumps(msg))
-                self.bookTicker_subscribtion_list[contract] = self.id
-                self.id += 1
-                return
+            self._bookTicket_subscribe(contract, params)
         elif channel == "aggTrade":
-            # Make sure the contract is in the bookTicker.
-            if contract not in self.bookTicker_subscribtion_list:
-                self.new_subscribe(symbol, "bookTicker")
+            self._aggTrade_subscribe(contract, params)
 
-            if symbol in self.strategy_counter.keys():
-                self.strategy_counter[symbol]["count"] += 1
-                self.add_log(
-                    msg=f"Already subscribed to {params} channel", level="info"
-                )
-            else:
-                msg = {
-                    "method": "SUBSCRIBE",
-                    "params": [params],
-                    "id": self.id}
-                # Subscribe to the websocket channel
-                self._ws.send(json.dumps(msg))
-                self.strategy_counter[symbol] = {"count": 1, "id": self.id}
-                # Update the aggTrade list from the strategy object
-                self.id += 1
+    def _bookTicket_subscribe(self, contract: Contract, params: str):
+        if contract in self.bookTicker_subscribtion_list:
+            self.add_log(
+                msg=f"Already subscribed to {params} channel", level="info"
+            )
             return
+        else:
+            msg = {
+                "method": "SUBSCRIBE",
+                "params": [params],
+                "id": self.id}
+            # immediatly show current bid and ask prices.
+            self.get_price(contract)
+            # Subscribe to the websocket channel
+            self._ws.send(json.dumps(msg))
+            self.bookTicker_subscribtion_list[contract] = self.id
+            self.id += 1
+            return
+
+    def _aggTrade_subscribe(self, contract: Contract, params: str):
+        # Make sure the contract is in the bookTicker.
+        if contract not in self.bookTicker_subscribtion_list:
+            self._bookTicket_subscribe(contract, params)
+
+        if contract.symbol in self.strategy_counter:
+            self.strategy_counter[contract.symbol]["count"] += 1
+            self.add_log(
+                msg=f"Already subscribed to {params} channel", level="info"
+            )
+        else:
+            msg = {
+                "method": "SUBSCRIBE",
+                "params": [params],
+                "id": self.id}
+            # Subscribe to the websocket channel
+            self._ws.send(json.dumps(msg))
+            self.strategy_counter[contract.symbol] = {"count": 1,
+                                                      "id": self.id}
+            # Update the aggTrade list from the strategy object
+            self.id += 1
+        return
 
     def unsubscribe_channel(
         self,
-        symbol: Union[str, None] = None,
         channel="bookTicker",
-        strategy: Union[None, "Strategy"] = None,
+        *,
+        symbol: Union[str, None] = None,
+        strategy: Union["Strategy", None] = None,
     ):
         if channel == "bookTicker":
-            params = [f"{symbol.lower()}@{channel}"]
-            _id = self.bookTicker_subscribtion_list[self.contracts[symbol]]
-            msg = {"method": "UNSUBSCRIBE", "params": params, "id": _id}
-            self._ws.send(json.dumps(msg))
-            self.bookTicker_subscribtion_list.pop(self.contracts[symbol])
-            self.prices.pop(symbol)
-            return
+            self._bookTicker_unsubscribe(symbol)
         elif channel == "aggTrade":
-            symbol = strategy.symbol
-            self.running_startegies.pop(f"{symbol}_{strategy.strategy_id}")
-            self.strategy_counter[symbol]["count"] -= 1
-            if self.strategy_counter[symbol]["count"] == 0:
-                params = [f"{symbol.lower()}@{channel}"]
-                msg = {
-                    "method": "UNSUBSCRIBE",
-                    "params": params,
-                    "id": self.strategy_counter[symbol]["id"],
+            self._aggTrade_unsubscribe(strategy)
+
+    def _bookTicker_unsubscribe(self, symbol: str):
+        _id = self.bookTicker_subscribtion_list[self.contracts[symbol]]
+        msg = {
+                "method": "UNSUBSCRIBE",
+                "params": [f"{symbol.lower()}@bookTicker"],
+                "id": _id
                 }
-                self._ws.send(json.dumps(msg))
-                self.strategy_counter.pop(symbol)
+        self._ws.send(json.dumps(msg))
+        self.bookTicker_subscribtion_list.pop(self.contracts[symbol])
+        self.prices.pop(symbol)
+        return
+
+    def _aggTrade_unsubscribe(self, strategy: "Strategy"):
+        symbol = strategy.symbol
+        self.running_startegies.pop(f"{symbol}_{strategy.strategy_id}")
+        self.strategy_counter[symbol]["count"] -= 1
+        if self.strategy_counter[symbol]["count"] == 0:
+            msg = {
+                    "method": "UNSUBSCRIBE",
+                    "params": [f"{symbol.lower()}@aggTrade"],
+                    "id": self.strategy_counter[symbol]["id"],
+                    }
+            self._ws.send(json.dumps(msg))
+            self.strategy_counter.pop(symbol)
             return
 
     # ########################### Strategy Arguments ##########################
     def _bookTickerMsg(self, data, symbol):
         """
-        bookTicker message is pushed when either one of the bid or ask changes.
-        Used to track a trading pairs and calculate unrealized PnL.
-
-        Subscribe to the bookTicker to track a contract pair,
-        or when starting new strategy.
-        """
-        # Update ask/bid prices
+    bookTicker message is pushed when either one of the bid or ask changes.
+    Used to track a trading pairs and calculate unrealized PnL.
+    Subscribe to the bookTicker to track a contract pair,
+    or when starting new strategy.
+    """
+    # Update ask/bid prices
         self.prices[symbol].bid = float(data["b"])
         self.prices[symbol].ask = float(data["a"])
+        # Check the status of the order for each running strategy
         for strategy in self.running_startegies.values():
             if symbol == strategy.symbol and hasattr(strategy, "order"):
-                # Check the order status
                 if strategy.order.status in ["NEW", "PARTIALLY_FILLED"]:
                     strategy.order = self.order_status(strategy.order)
                 elif strategy.order.status in ["CANCELED", "REJECTED",
                                                "EXPIRED"]:
-                    self.unsubscribe_channel(
-                        channel="aggTrade",
-                        strategy=strategy)
+                    self._aggTrade_unsubscribe(strategy=strategy)
+                    strategy.is_running = False
                     continue
                 if strategy.order.status == "FILLED":
                     # Calculate the uPnL only when an order is made
                     self._check_tp_sl(strategy)
         return
-
-    def _check_tp_sl(self, strategy: "Strategy"):
-        buying_price = strategy.order.price
-        strategy.uPnl = (self.prices[strategy.symbol].ask / buying_price - 1)
-        strategy.uPnl *= 100
-        # Take Profit or Stop Loss check
-        if strategy.uPnl >= strategy.tp or strategy.uPnl <= -1 * strategy.sl:
-            self._sell_strategy_asset(strategy)
-        return
-
-    def _sell_strategy_asset(self, strategy):
-        sell_order = self.make_order(
-            self.contracts[strategy.contract.symbol],
-            "SELL",
-            order_type="MARKET",
-            quantity=strategy.order.quantity,
-        )
-        if sell_order:
-            strategy.order = sell_order
-            strategy.relaizedPnL += self._PnLcalciator(strategy, sell_order)
-            strategy.had_assits = False
-        return
-
-    @classmethod
-    def _PnLcalciator(cls, strategy: "Strategy", sell_order: Order) -> float:
-        sell_margin = sell_order.quantity * sell_order.price
-        buy_margin = strategy.order.quantity * strategy.order.price
-        return sell_margin - buy_margin
 
     def _aggTradeMsg(self, data, symbol):
         """
@@ -469,13 +391,17 @@ class BinanceClient:
         for strategy in self.running_startegies.values():
             if strategy.is_running:
                 if symbol == strategy.contract.symbol:
-                    decision = strategy.parse_trade(trade_price,
-                                                    volume,
-                                                    timestamp)
-                    self._process_dicision(strategy, decision,
-                                           latest_price=trade_price)
+                    decision = strategy.parse_trade(
+                        trade_price,
+                        volume,
+                        timestamp
+                        )
+                    self._process_dicision(
+                        strategy=strategy,
+                        decision=decision,
+                        latest_price=trade_price)
             else:
-                self.unsubscribe_channel(symbol, "aggTrade", strategy)
+                self._aggTrade_unsubscribe(strategy=strategy)
         return
 
     def _process_dicision(
@@ -489,19 +415,18 @@ class BinanceClient:
                 # USDT or BUSD, etc..
                 base_asset = strategy.contract.quoteAsset
                 # get the balance information
-                balance = self.balance[base_asset]
+                balance = self.balance[base_asset].availableBalance
                 # Calculate the desired money for trade
-                buy_margin = balance.availableBalance * strategy.buy_pct
+                buy_margin = balance * strategy.buy_pct
                 # calculate order quantity and apply 5% negative slippage
                 quantity_margin = (buy_margin / latest_price) * 0.95
                 quantity_margin = round(
                     quantity_margin, strategy.contract.quantityPrecision
                 )
-
                 if quantity_margin > min_qty_margin:
                     order = self.make_order(
                         strategy.contract,
-                        order_side="BUY",
+                        side="BUY",
                         order_type="MARKET",
                         quantity=quantity_margin,
                     )
@@ -522,8 +447,7 @@ class BinanceClient:
                     )
                     self.add_log(msg=msg, level="info")
             else:
-                pass  # HODLE
-
+                pass  # Hold the assets
         elif decision == "sell or don't enter":
             if strategy.had_assits:
                 # sell when there is an existing order and poor indicators
@@ -532,7 +456,15 @@ class BinanceClient:
                 pass  # Do not enter
         return
 
-    def add_log(self, msg: str, level: str):
-        self.log_map[level.lower()](msg)
-        msg = f"{self.exchange} Connector: {msg}"
-        self.log_queue.append(self._queue_tuple(msg, level))
+    def _sell_strategy_asset(self, strategy):
+        sell_order = self.make_order(
+            contract=self.strategy.contract,
+            side="SELL",
+            order_type="MARKET",
+            quantity=strategy.order.quantity,
+        )
+        if sell_order:
+            strategy.order = sell_order
+            strategy.relaizedPnL += self._PnLcalciator(strategy, sell_order)
+            strategy.had_assits = False
+        return
