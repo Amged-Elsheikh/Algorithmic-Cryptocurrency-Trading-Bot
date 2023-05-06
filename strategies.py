@@ -1,13 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 
 from Moduls.data_modul import Order
 
-if TYPE_CHECKING:
-    from Connectors.binance_connector import BinanceClient
+from Connectors.crypto_base_class import CryptoExchange
 
 import warnings
 
@@ -27,7 +26,7 @@ class Strategy(ABC):
 
     def __init__(
         self,
-        client: 'BinanceClient',
+        client: 'CryptoExchange',
         symbol: str,
         interval: str,
         tp: float,
@@ -125,6 +124,11 @@ class Strategy(ABC):
             ]
             return 'New candle'
 
+    def _PnLcalciator(self, sell_order: Order) -> float:
+        sell_margin = sell_order.quantity * sell_order.price
+        buy_margin = self.order.quantity * self.order.price
+        return sell_margin - buy_margin
+
     @abstractmethod
     def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
         pass
@@ -133,7 +137,7 @@ class Strategy(ABC):
 class TechnicalStrategies(Strategy):
     def __init__(
         self,
-        client: 'BinanceClient',
+        client: 'CryptoExchange',
         symbol: str,
         interval: str,
         tp: float,
