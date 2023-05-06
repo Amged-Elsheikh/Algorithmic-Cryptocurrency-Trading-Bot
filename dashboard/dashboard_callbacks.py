@@ -11,9 +11,9 @@ from app import clients
 
 LOGS_COLOR_MAP = {
     'debug': 'primary',
-    'info': 'info',
+    'info': 'secondary',
     'warning': 'warning',
-    'error': 'secondary',
+    'error': 'danger',
     'critical': 'danger',
 }
 
@@ -57,18 +57,17 @@ def update_watchlist_table(prev_data, n, data):
         symbol = removed_row['Symbol']
         client.unsubscribe_channel(channel='bookTicker', symbol=symbol)
         # After unsubscribing, the Backend will manage to remove from the UI
-    else:
-        data = []
-        for client in clients.values():
-            for price in client.prices.values():
-                data.append(
-                    {
-                        'Symbol': price.symbol,
-                        'Exchange': price.exchange,
-                        'bidPrice': price.bid,
-                        'askPrice': price.ask,
-                    }
-                )
+    elif ctx.triggered_id == 'update-interval':
+        data = [
+            {
+                'Symbol': price.symbol,
+                'Exchange': price.exchange,
+                'bidPrice': price.bid,
+                'askPrice': price.ask
+                }
+            for client in clients.values()
+            for price in client.prices.values()
+            ]
     return data
 
 
@@ -93,24 +92,22 @@ def update_strategy_table(prev_data, n, data):
                 order_type='MARKET',
                 quantity=strategy.order.quantity,
             )
-    else:
-        data = []
-        for client in clients.values():
-            for strategy in client.running_startegies.values():
-                data.append(
-                    {
-                        'ID': strategy.strategy_id,
-                        'Exchange': strategy.client.exchange,
-                        'Symbol': strategy.symbol,
-                        'Qty': (strategy.order.quantity
+    elif ctx.triggered_id == 'update-interval':
+        data = [
+            {
+                'ID': strategy.strategy_id,
+                'Exchange': strategy.client.exchange,
+                'Symbol': strategy.symbol,
+                'Qty': (strategy.order.quantity
+                        if strategy.had_assits else 0),
+                'Entry Price': (strategy.order.price
                                 if strategy.had_assits else 0),
-                        'Entry Price': (
-                            strategy.order.price if strategy.had_assits else 0
-                        ),
-                        'Current Price': client.prices[strategy.symbol].bid,
-                        'uPnl': f'{strategy.unpnl*100}%',
-                    }
-                )
+                'Current Price': client.prices[strategy.symbol].bid,
+                'uPnl': f'{strategy.unpnl*100}%',
+                }
+            for client in clients.values()
+            for strategy in client.running_startegies.values()
+            ]
     return data
 
 
