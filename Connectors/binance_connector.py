@@ -464,7 +464,10 @@ class BinanceClient(CryptoExchange):
             quantity=strategy.order.quantity,
         )
         if sell_order:
+            while sell_order.status != "FILLED":
+                sell_order = self.order_status(sell_order)
+                # time.sleep(2)
+            strategy.relaizedPnL += strategy._PnLcalciator(sell_order)
             strategy.order = sell_order
-            strategy.relaizedPnL += self._PnLcalciator(strategy, sell_order)
             strategy.had_assits = False
         return
