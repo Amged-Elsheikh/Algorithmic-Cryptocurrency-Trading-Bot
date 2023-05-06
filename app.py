@@ -1,12 +1,12 @@
 from typing import Dict
-from dash import Dash, html, dcc
+
 import dash_bootstrap_components as dbc
+from dash import Dash, dcc, html
 
 from Connectors.binance_connector import BinanceClient
 from Connectors.crypto_base_class import CryptoExchange
-from dashboard.dashboard_ui import (nav_bar, upper_container, middel_container,
-                                    bottom_container, footer, technical_modal)
-
+from dashboard.dashboard_ui import (bottom_container, footer, middel_container,
+                                    nav_bar, technical_modal, upper_container)
 
 clients = {'Binance': BinanceClient(is_spot=False, is_test=True)}
 
