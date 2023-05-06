@@ -320,10 +320,16 @@ class BinanceClient(CryptoExchange):
         symbol: Union[str, None] = None,
         strategy: Union['Strategy', None] = None,
     ):
-        if channel == 'bookTicker':
-            self._bookTicker_unsubscribe(symbol)
-        elif channel == 'aggTrade':
+        if channel == 'aggTrade':
             self._aggTrade_unsubscribe(strategy)
+        elif channel == 'bookTicker':
+            if symbol in self.strategy_counter:
+                msg = (f"{symbol} had a running strategy and "
+                       "can't be removed from the watchlist")
+                self.add_log(msg=msg, level='info')
+                return
+            self._bookTicker_unsubscribe(symbol)
+        return
 
     def _bookTicker_unsubscribe(self, symbol: str):
         _id = self.bookTicker_subscribtion_list[self.contracts[symbol]]
@@ -359,7 +365,7 @@ class BinanceClient(CryptoExchange):
         Subscribe to the bookTicker to track a contract pair,
         or when starting new strategy.
         '''
-    # Update ask/bid prices
+        # Update ask/bid prices
         self.prices[symbol].bid = float(data['b'])
         self.prices[symbol].ask = float(data['a'])
         # Check the status of the order for each running strategy

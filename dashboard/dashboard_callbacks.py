@@ -51,13 +51,7 @@ def subscribe_to_new_stream(value: str):
     State('watchlist-table', 'data'),
 )
 def update_watchlist_table(prev_data, n, data):
-    if ctx.triggered_id == 'watchlist-table':
-        removed_row = get_removed_row(prev_data, data)
-        client = clients[removed_row['Exchange']]
-        symbol = removed_row['Symbol']
-        client.unsubscribe_channel(channel='bookTicker', symbol=symbol)
-        # After unsubscribing, the Backend will manage to remove from the UI
-    elif ctx.triggered_id == 'update-interval':
+    if ctx.triggered_id == 'update-interval':
         data = [
             {
                 'Symbol': price.symbol,
@@ -68,6 +62,13 @@ def update_watchlist_table(prev_data, n, data):
             for client in clients.values()
             for price in client.prices.values()
             ]
+    elif ctx.triggered_id == 'watchlist-table':
+        removed_row = get_removed_row(prev_data, data)
+        client = clients[removed_row['Exchange']]
+        symbol = removed_row['Symbol']
+        client.unsubscribe_channel(channel='bookTicker', symbol=symbol)
+        if symbol in client.strategy_counter:
+            return no_update
     return data
 
 
