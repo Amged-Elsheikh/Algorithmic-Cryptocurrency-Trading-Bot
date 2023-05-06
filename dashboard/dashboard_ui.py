@@ -1,22 +1,19 @@
+from datetime import datetime
 from functools import partial
-from typing import TYPE_CHECKING, Dict
+from typing import Dict
 
 import dash
 import dash_bootstrap_components as dbc
 import pandas as pd
 from dash import Input, Output, State, dash_table, dcc, html
 
-if TYPE_CHECKING:
-    from Connectors.binance_connector import BinanceClient
-
-from datetime import datetime
-
+from Connectors.crypto_base_class import CryptoExchange
 from Moduls.data_modul import Contract
 from strategies import intervals_to_sec
 
 
 # Helpful Functions
-def get_contracts(clients: Dict[str, 'BinanceClient']) -> Dict[str, Contract]:
+def get_contracts(clients: Dict[str, 'CryptoExchange']) -> Dict[str, Contract]:
     contracts = dict()
     for exchange, client in clients.items():
         contracts.update(
@@ -42,7 +39,7 @@ def nav_bar():
     return nav_bar
 
 
-def upper_container(clients: Dict[str, 'BinanceClient']):
+def upper_container(clients: Dict[str, 'CryptoExchange']):
     contracts = get_contracts(clients)
     watchlist_contracts = html.Div(
         [
