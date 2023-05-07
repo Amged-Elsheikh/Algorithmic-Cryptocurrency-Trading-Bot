@@ -104,7 +104,7 @@ def update_strategy_table(prev_data, n, data):
                 'Entry Price': (strategy.order.price
                                 if strategy.had_assits else 0),
                 'Current Price': client.prices[strategy.symbol].bid,
-                'uPnl': f'{strategy.unpnl*100}%',
+                'uPnl': f'{strategy.unpnl*100:.2f}%',
                 }
             for client in clients.values()
             for strategy in client.running_startegies.values()
