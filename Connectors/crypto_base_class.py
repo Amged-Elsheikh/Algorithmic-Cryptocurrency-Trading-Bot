@@ -3,10 +3,9 @@ import time
 from abc import ABC, abstractmethod, abstractproperty
 from collections import deque, namedtuple
 from threading import Thread
-from typing import TYPE_CHECKING, Dict, List, Union, Callable
+from typing import TYPE_CHECKING, Dict, List, Union
 
 import websocket
-import requests
 from requests.models import Response
 
 from Moduls.data_modul import Balance, CandleStick, Contract, Order, Price
@@ -16,11 +15,6 @@ if TYPE_CHECKING:
 
 
 class CryptoExchange(ABC):
-    _http_dict: Dict[str, Callable] = {
-            'GET': requests.get,
-            'POST': requests.post,
-            'DELETE': requests.delete
-            }
 
     def __init__(self):
         self._queue_tuple = namedtuple('Logs', 'msg, level')

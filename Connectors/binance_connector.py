@@ -8,6 +8,7 @@ import time
 from typing import TYPE_CHECKING, Dict, Union
 from urllib.parse import urlencode
 
+import requests
 import websocket
 from dotenv import load_dotenv
 from requests.exceptions import RequestException
@@ -102,8 +103,8 @@ class BinanceClient(CryptoExchange):
             params['timestamp'] = int(time.time() * 1000)
             # Generate the signature for the query
             params['signature'] = self._generate_signature(urlencode(params))
-            http_method = self._http_dict[http_method]
-            response = http_method(
+            response = requests.request(
+                method=http_method,
                 url=self._base_url + endpoint,
                 params=params,
                 headers=self._header
