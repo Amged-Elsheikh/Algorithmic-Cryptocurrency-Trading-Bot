@@ -5,10 +5,9 @@ import logging
 import logging.config
 import os
 import time
-from typing import TYPE_CHECKING, Callable, Dict, Union
+from typing import TYPE_CHECKING, Dict, Union
 from urllib.parse import urlencode
 
-import requests
 import websocket
 from dotenv import load_dotenv
 from requests.exceptions import RequestException
@@ -25,11 +24,6 @@ logging.config.fileConfig('logger.config')
 
 
 class BinanceClient(CryptoExchange):
-    _http_dict: Dict[str, Callable] = {
-            'GET': requests.get,
-            'POST': requests.post,
-            'DELETE': requests.delete
-            }
     _loaded = dict()
 
     def __new__(cls, is_spot: bool, is_test: bool):
