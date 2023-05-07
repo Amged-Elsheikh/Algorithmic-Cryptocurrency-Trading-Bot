@@ -175,10 +175,9 @@ class CryptoExchange(ABC):
     # ########################### Strategy Arguments ##########################
     def _check_tp_sl(self, strategy: 'Strategy'):
         buying_price = strategy.order.price
-        strategy.uPnl = self.prices[strategy.symbol].ask / buying_price - 1
-        strategy.uPnl *= 100
+        strategy.unpnl = self.prices[strategy.symbol].ask / buying_price - 1
         # Take Profit or Stop Loss check
-        if strategy.uPnl >= strategy.tp or strategy.uPnl <= -1 * strategy.sl:
+        if strategy.unpnl >= strategy.tp or strategy.unpnl <= -1 * strategy.sl:
             self._sell_strategy_asset(strategy)
         return
 

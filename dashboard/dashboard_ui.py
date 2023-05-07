@@ -77,11 +77,11 @@ def strategy_selector(contracts):
     contracts_dropmenu = html.Div(
         [
             html.Span('Contract'),
-            dbc.Select(
+            dcc.Dropdown(
                 options=list(contracts.keys()),
                 value=None,
                 id='strategy-contracts-dropdown',
-                class_name='small-font',
+                className='small-font',
             ),
         ],
         className='col-3 strategy-component ms-4',

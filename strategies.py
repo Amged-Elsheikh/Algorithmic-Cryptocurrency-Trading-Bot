@@ -55,20 +55,20 @@ class Strategy(ABC):
         '''
         self.relaizedPnL = 0
         self.unpnl = 0
-        self.tp = tp  # Take profit
-        self.sl = sl  # Stop Loss
-        self.buy_pct = (
-            buy_pct  # The percentage of available balance to use for the trade
-        )
-        candles_range = range(len(self.candles))
-        data = {
-            'timestamp': [self.candles[i].timestamp for i in candles_range],
-            'open': [self.candles[i].open for i in candles_range],
-            'close': [self.candles[i].close for i in candles_range],
-            'high': [self.candles[i].high for i in candles_range],
-            'low': [self.candles[i].low for i in candles_range],
-            'volume': [self.candles[i].volume for i in candles_range],
-        }
+        self.tp = tp
+        self.sl = sl
+        self.buy_pct = buy_pct
+        data = [
+            {
+                'timestamp': candle.timestamp,
+                'open': candle.open,
+                'close': candle.close,
+                'high': candle.high,
+                'low': candle.low,
+                'volume': candle.volume,
+                }
+            for candle in self.candles
+            ]
         self.df = pd.DataFrame(data)
         self.client.running_startegies[f'{self.symbol}_{self.strategy_id}'] =\
             self
@@ -80,40 +80,33 @@ class Strategy(ABC):
         size: Last transaction quantity
         timestamp: the time of the last transaction in ns
         '''
-        n = len(self.df) - 1
+        last_candle = self.df.iloc[-1]
         # Check if the last trade belongs to the last candle
-        if timestamp < self.df.loc[n, 'timestamp'] + self.timeframe:
-            self.df.loc[n, 'close'] = price
-            self.df.loc[n, 'volume'] += volume
-            if price > self.df.loc[n, 'high']:
-                self.df.loc[n, 'high'] = price
-            elif price < self.df.loc[n, 'low']:
-                self.df.loc[n, 'low'] = price
+        if timestamp < last_candle['timestamp'] + self.timeframe:
+            last_candle['close'] = price
+            last_candle['volume'] += volume
+            last_candle['high'] = max(last_candle['high'], price)
+            last_candle['low'] = min(last_candle['low'], price)
             return 'Same candle'
-        # For new candle, there might be some missing candles
         else:
-            last_candle = self.df.loc[n]
             # Account for missing candles
-            missing_candles = int(
-                (timestamp - last_candle.timestamp) / self.timeframe - 1
-            )
+            missing_candles = (timestamp - last_candle['timestamp']
+                               ) / self.timeframe - 1
             # If there are any missing candles, create them
-            for _ in range(missing_candles):
-                open_time = last_candle.timestamp + self.timeframe
-                open_ = close = high = low = np.nan
+            for _ in range(int(missing_candles)):
+                open_time = last_candle['timestamp'] + self.timeframe
+                open_price = close_price = high = low = np.nan
                 volume = 0
-                self.df.loc[len(self.df), :] = [
+                self.df.loc[len(self.df)] = [
                     open_time,
-                    open_,
-                    close,
+                    open_price,
+                    close_price,
                     high,
                     low,
                     volume,
                 ]
-                last_candle = self.df.loc[n]
-            # Update the last candle
-            last_candle = self.df.loc[n]
-            open_time = last_candle.timestamp + self.timeframe
+                last_candle = self.df.iloc[-1]
+            open_time = last_candle['timestamp'] + self.timeframe
             self.df.loc[len(self.df), :] = [
                 open_time,
                 price,
