@@ -17,8 +17,8 @@ m = 60
 h = 60 * m
 d = 24 * h
 intervals_to_sec = {'1m': m, '15m': 15 * m, '30m': 30 * m, '1h': h,
-                    '2h': 2 * h, '4h': 4 * h, '8h': 8 * h, '12h': 12 * h,
-                    '1d': d, '2d': 2 * d}
+                    '2h': 2 * h, '4h': 4 * h, '6h': 6 * h, '8h': 8 * h,
+                    '12h': 12 * h, '1d': d, '2d': 2 * d}
 
 
 class Strategy(ABC):
