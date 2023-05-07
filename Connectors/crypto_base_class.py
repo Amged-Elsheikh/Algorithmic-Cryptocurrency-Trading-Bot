@@ -49,6 +49,10 @@ class CryptoExchange(ABC):
         the keys are the counter 'count' and the 'id' for the web socket
         '''
 
+    @abstractmethod
+    def _init(self, is_spot: bool, is_test: bool) -> None:
+        pass
+
     @abstractproperty
     def exchange(self) -> str:
         pass

@@ -66,6 +66,7 @@ class BinanceClient(CryptoExchange):
         real_test = 'Test' if is_test else ''
         self._api_key = f'{self.exchange}{spot_future}{real_test}APIKey'
         self._api_secret = self._api_key.replace('APIKey', 'APISecret')
+        return
 
     @property
     def _is_connected(self):
