@@ -89,7 +89,7 @@ def strategy_selector(contracts):
 
     entry_pct = html.Div(
         [
-            html.Span('Entry pct'),
+            html.Span('Entry pct %'),
             dbc.Input(
                 type='number',
                 id='entry-pct',
@@ -101,7 +101,7 @@ def strategy_selector(contracts):
 
     tp_entry = html.Div(
         [
-            html.Span('TP'),
+            html.Span('TP %'),
             dbc.Input(
                 type='number',
                 id='take-profit',
@@ -113,7 +113,7 @@ def strategy_selector(contracts):
 
     sl_entry = html.Div(
         [
-            html.Span('SL'),
+            html.Span('SL %'),
             dbc.Input(
                 type='number',
                 id='stop-loss',
