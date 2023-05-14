@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
-from Moduls.data_modul import Order
+from Moduls.data_modul import Order, CandleStick
 
 from Connectors.crypto_base_class import CryptoExchange
 
@@ -39,17 +39,18 @@ class Strategy(ABC):
         # To unsubscribe a channel in binance, you need to provide an id
         self.symbol = symbol
         self.contract = self.client.contracts[symbol]
+        self.interval = interval
         self.timeframe = intervals_to_sec[interval] * 1000
 
-        self.client.new_subscribe(channel='aggTrade', symbol=self.symbol)
+        self.client.new_subscribe('kline', symbol, interval)
         self.client.add_log(msg='Strategy added succesfully.', level='info')
-        self.id = self.client.strategy_counter[self.symbol]['id']
-        self.strategy_id = Strategy.new_strategy_id
+        self.ws_channel_key = f'{symbol}_{interval}'
+        self.strategy_key = f'{self.ws_channel_key}_{Strategy.new_strategy_id}'
+        self.client.running_startegies[self.strategy_key] = self
+        Strategy.new_strategy_id += 1
 
         self.candles = self.client.get_candlestick(self.contract, interval)
         self.order: Order
-        self.had_assits = False
-        self.is_running = True
         '''
         Used to remove the strategy from the connector after it's been closed
         '''
@@ -70,52 +71,39 @@ class Strategy(ABC):
             for candle in self.candles
             ]
         self.df = pd.DataFrame(data)
-        self.client.running_startegies[f'{self.symbol}_{self.strategy_id}'] =\
-            self
-        Strategy.new_strategy_id += 1
 
-    def _update_candles(self, price: float, volume: float, timestamp: int):
-        '''
-        price: Last tranasaction price
-        size: Last transaction quantity
-        timestamp: the time of the last transaction in ns
-        '''
+    def _update_candles(self, new_candle: CandleStick):
         last_candle = self.df.iloc[-1]
         # Check if the last trade belongs to the last candle
-        if timestamp < last_candle['timestamp'] + self.timeframe:
-            last_candle['close'] = price
-            last_candle['volume'] += volume
-            last_candle['high'] = max(last_candle['high'], price)
-            last_candle['low'] = min(last_candle['low'], price)
+        if new_candle.timestamp == last_candle['timestamp']:
+            last_candle = new_candle
             return 'Same candle'
-        else:
-            # Account for missing candles
-            missing_candles = (timestamp - last_candle['timestamp']
-                               ) / self.timeframe - 1
-            # If there are any missing candles, create them
-            for _ in range(int(missing_candles)):
-                open_time = last_candle['timestamp'] + self.timeframe
-                open_price = close_price = high = low = np.nan
-                volume = 0
-                self.df.loc[len(self.df)] = [
-                    open_time,
-                    open_price,
-                    close_price,
-                    high,
-                    low,
-                    volume,
-                ]
-                last_candle = self.df.iloc[-1]
+        # Account for missing candles
+        missing_candles = (new_candle.timestamp - last_candle['timestamp']
+                           ) / self.timeframe - 1
+        # If there are any missing candles, create them
+        for _ in range(int(missing_candles)):
             open_time = last_candle['timestamp'] + self.timeframe
-            self.df.loc[len(self.df), :] = [
+            open_price = close_price = high = low = np.nan
+            volume = 0
+            self.df.loc[len(self.df)] = [
                 open_time,
-                price,
-                price,
-                price,
-                price,
-                volume,
-            ]
-            return 'New candle'
+                open_price,
+                close_price,
+                high,
+                low,
+                volume
+                ]
+            last_candle = self.df.iloc[-1]
+        self.df.loc[len(self.df), :] = [
+            new_candle.timestamp,
+            new_candle.open,
+            new_candle.close,
+            new_candle.high,
+            new_candle.low,
+            new_candle.volume,
+        ]
+        return 'New candle'
 
     def _PnLcalciator(self, sell_order: Order) -> float:
         sell_margin = sell_order.quantity * sell_order.price
@@ -123,7 +111,7 @@ class Strategy(ABC):
         return sell_margin - buy_margin
 
     @abstractmethod
-    def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
+    def parse_trade(self, new_candle: CandleStick) -> str:
         pass
 
 
@@ -156,12 +144,12 @@ class TechnicalStrategies(Strategy):
         self._af_max = af_max
         self._SAR()
 
-    def parse_trade(self, price: float, volume: float, timestamp: int) -> str:
+    def parse_trade(self, new_candle: CandleStick) -> str:
         '''
         This function will keep updating the technical indicators values
         and trade if needed
         '''
-        candle = self._update_candles(price, volume, timestamp)
+        candle = self._update_candles(new_candle)
         ema_fast = self._EMA(self.ema['fast']).iloc[-1]
         ema_slow = self._EMA(self.ema['slow']).iloc[-1]
         ema_check = 3 * int(ema_fast > ema_slow)

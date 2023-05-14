@@ -250,22 +250,24 @@ class BinanceClient(CryptoExchange):
         '''
         # Read the received message
         data = json.loads(msg)
-        symbol = data.get('s')
         channel = data.get('e')
+        symbol = data.get('s')
         if channel == 'bookTicker':
             self._bookTickerMsg(data, symbol)
-        elif channel == 'aggTrade':
-            self._aggTradeMsg(data, symbol)
+        elif channel == 'kline':
+            self._klineMsg(data, symbol)
         else:
             return
 
-    def new_subscribe(self, channel='bookTicker', symbol='BTCUSDT'):
+    def new_subscribe(self, channel='bookTicker', symbol='BTCUSDT',
+                      interval: str = None):
         params = f'{symbol.lower()}@{channel}'
         contract = self.contracts[symbol]
         if channel == 'bookTicker':
             self._bookTicket_subscribe(contract, params)
-        elif channel == 'aggTrade':
-            self._aggTrade_subscribe(contract, params)
+        elif channel == 'kline':
+            params += f'_{interval}'
+            self._kline_subscribe(contract, params)
 
     def _bookTicket_subscribe(self, contract: Contract, params: str):
         if contract in self.bookTicker_subscribtion_list:
@@ -277,7 +279,8 @@ class BinanceClient(CryptoExchange):
             msg = {
                 'method': 'SUBSCRIBE',
                 'params': [params],
-                'id': self.id}
+                'id': self.id
+                }
             # immediatly show current bid and ask prices.
             self.get_price(contract)
             # Subscribe to the websocket channel
@@ -286,13 +289,19 @@ class BinanceClient(CryptoExchange):
             self.id += 1
             return
 
-    def _aggTrade_subscribe(self, contract: Contract, params: str):
+    def _kline_subscribe(self, contract: Contract, params: str):
         # Make sure the contract is in the bookTicker.
-        if contract not in self.bookTicker_subscribtion_list:
-            self._bookTicket_subscribe(contract, params)
+        symbol = contract.symbol
+        interval = params.split('_')[1]
+        strategy_key = f'{symbol}_{interval}'
 
-        if contract.symbol in self.strategy_counter:
-            self.strategy_counter[contract.symbol]['count'] += 1
+        if contract not in self.bookTicker_subscribtion_list:
+            self._bookTicket_subscribe(
+                contract,
+                params=f'{symbol.lower}_@bookTicker')
+
+        if strategy_key in self.strategy_counter:
+            self.strategy_counter[strategy_key]['count'] += 1
             self.add_log(
                 msg=f'Already subscribed to {params} channel', level='info'
             )
@@ -300,11 +309,12 @@ class BinanceClient(CryptoExchange):
             msg = {
                 'method': 'SUBSCRIBE',
                 'params': [params],
-                'id': self.id}
+                'id': self.id
+                }
             # Subscribe to the websocket channel
             self._ws.send(json.dumps(msg))
-            self.strategy_counter[contract.symbol] = {'count': 1,
-                                                      'id': self.id}
+            self.strategy_counter[strategy_key] = {'count': 1,
+                                                   'id': self.id}
             # Update the aggTrade list from the strategy object
             self.id += 1
         return
@@ -316,12 +326,15 @@ class BinanceClient(CryptoExchange):
         symbol: Union[str, None] = None,
         strategy: Union['Strategy', None] = None,
     ):
-        if channel == 'aggTrade':
-            self._aggTrade_unsubscribe(strategy)
+        if channel == 'kline':
+            self._kline_unsubscribe(strategy)
         elif channel == 'bookTicker':
-            if symbol in self.strategy_counter:
-                msg = (f"{symbol} had a running strategy and "
-                       "can't be removed from the watchlist")
+            running_contracts = list(map(lambda x: x.split('_')[0],
+                                         self.strategy_counter.keys()))
+            if symbol in running_contracts:
+                msg = (
+                    f"{symbol} had a running strategy and "
+                    "can't be removed from the watchlist")
                 self.add_log(msg=msg, level='info')
                 return
             self._bookTicker_unsubscribe(symbol)
@@ -339,18 +352,19 @@ class BinanceClient(CryptoExchange):
         self.prices.pop(symbol)
         return
 
-    def _aggTrade_unsubscribe(self, strategy: 'Strategy'):
+    def _kline_unsubscribe(self, strategy: 'Strategy'):
         symbol = strategy.symbol
-        self.running_startegies.pop(f'{symbol}_{strategy.strategy_id}')
-        self.strategy_counter[symbol]['count'] -= 1
-        if self.strategy_counter[symbol]['count'] == 0:
+        counters_key = f'{strategy.symbol}_{strategy.interval}'
+        self.running_startegies.pop(strategy.strategy_key)
+        self.strategy_counter[counters_key]['count'] -= 1
+        if self.strategy_counter[counters_key]['count'] == 0:
             msg = {
                     'method': 'UNSUBSCRIBE',
-                    'params': [f'{symbol.lower()}@aggTrade'],
-                    'id': self.strategy_counter[symbol]['id'],
+                    'params': [f'{symbol.lower()}@kline_{strategy.interval}'],
+                    'id': self.strategy_counter[counters_key]['id'],
                     }
             self._ws.send(json.dumps(msg))
-            self.strategy_counter.pop(symbol)
+            self.strategy_counter.pop(counters_key)
             return
 
     # ########################### Strategy Arguments ##########################
@@ -371,15 +385,14 @@ class BinanceClient(CryptoExchange):
                     strategy.order = self.order_status(strategy.order)
                 elif strategy.order.status in ['CANCELED', 'REJECTED',
                                                'EXPIRED']:
-                    self._aggTrade_unsubscribe(strategy=strategy)
-                    strategy.is_running = False
+                    self._kline_unsubscribe(strategy=strategy)
                     continue
                 if strategy.order.status == 'FILLED':
                     # Calculate the uPnL only when an order is made
                     self._check_tp_sl(strategy)
         return
 
-    def _aggTradeMsg(self, data, symbol):
+    def _klineMsg(self, data, symbol):
         '''
         AggTrade message is send when a trade is made.
         Used to update indicators and make trading decision.
@@ -387,30 +400,22 @@ class BinanceClient(CryptoExchange):
         Subscribe to this channel when starting new strategy, and cancel the
         subscribtion once all running strategies for a given contract stopped.
         '''
-        trade_price = float(data['p'])
-        volume = float(data['q'])
-        timestamp = int(data['T'])
+        data = data['k']
+        candle = [data[i] for i in ['t', 'o', 'h', 'l', 'c', 'v']]
+        sent_candle = CandleStick(candle, self.exchange)
         for strategy in self.running_startegies.values():
-            if strategy.is_running:
-                if symbol == strategy.contract.symbol:
-                    decision = strategy.parse_trade(
-                        trade_price,
-                        volume,
-                        timestamp
-                        )
-                    self._process_dicision(
-                        strategy=strategy,
-                        decision=decision,
-                        latest_price=trade_price)
+            if hasattr(strategy, 'order'):
+                if [strategy.symbol, strategy.interval] == [symbol, data['i']]:
+                    decision = strategy.parse_trade(sent_candle)
+                    self._process_dicision(strategy, decision)
             else:
-                self._aggTrade_unsubscribe(strategy=strategy)
+                self._kline_unsubscribe(strategy)
         return
 
-    def _process_dicision(
-        self, strategy: 'Strategy', decision: str, latest_price: float
-    ):
+    def _process_dicision(self, strategy: 'Strategy', decision: str):
         if decision == 'buy or hodl':
-            if not strategy.had_assits:
+            if not hasattr(strategy, 'order'):
+                latest_price = strategy.df['close'].iloc[-1]
                 # Binance don't allow less than 10$ transaction
                 min_qty_margin = max(10 / latest_price,
                                      strategy.contract.minQuantity)
@@ -434,7 +439,6 @@ class BinanceClient(CryptoExchange):
                     )
                     if order:
                         strategy.order = order
-                        strategy.had_assits = True
                         msg = (
                             f'{strategy.order.symbol} buying order was made. '
                             f'Quantity: {strategy.order.quantity}. '
@@ -451,7 +455,7 @@ class BinanceClient(CryptoExchange):
             else:
                 pass  # Hold the assets
         elif decision == "sell or don't enter":
-            if strategy.had_assits:
+            if hasattr(strategy, 'order'):
                 # sell when there is an existing order and poor indicators
                 self._sell_strategy_asset(strategy)
             else:
@@ -471,5 +475,5 @@ class BinanceClient(CryptoExchange):
                 # time.sleep(2)
             strategy.relaizedPnL += strategy._PnLcalciator(sell_order)
             strategy.order = sell_order
-            strategy.had_assits = False
+            self._kline_unsubscribe(strategy)
         return

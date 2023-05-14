@@ -82,10 +82,10 @@ def update_strategy_table(prev_data, n, data):
     if ctx.triggered_id == 'uPnl-table':
         removed_row = get_removed_row(prev_data, data)
         client = clients[removed_row['Exchange']]
-        symbol = removed_row['Symbol']
         strategy_id = removed_row['ID']
-        strategy = client.running_startegies[f'{symbol}_{strategy_id}']
-        client.unsubscribe_channel(channel='aggTrade', strategy=strategy)
+        strategy = client.running_startegies[strategy_id]
+        client = strategy.client
+        client.unsubscribe_channel(channel='kline', strategy=strategy)
         if hasattr(strategy, 'order'):
             strategy.order = client.make_order(
                 contract=strategy.contract,
@@ -96,13 +96,13 @@ def update_strategy_table(prev_data, n, data):
     elif ctx.triggered_id == 'update-interval':
         data = [
             {
-                'ID': strategy.strategy_id,
+                'ID': strategy.strategy_key,
                 'Exchange': strategy.client.exchange,
                 'Symbol': strategy.symbol,
                 'Qty': (strategy.order.quantity
-                        if strategy.had_assits else 0),
+                        if hasattr(strategy, 'order') else 0),
                 'Entry Price': (strategy.order.price
-                                if strategy.had_assits else 0),
+                                if hasattr(strategy, 'order') else 0),
                 'Current Price': client.prices[strategy.symbol].bid,
                 'uPnl': f'{strategy.unpnl*100:.2f}%',
                 }

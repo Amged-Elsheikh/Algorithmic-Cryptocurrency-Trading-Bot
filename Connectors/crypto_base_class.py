@@ -164,7 +164,8 @@ class CryptoExchange(ABC):
     # ########################### Websocket Arguments ########################
     # ########################### Websocket Arguments ########################
     @abstractmethod
-    def new_subscribe(self, channel: str, symbol: str) -> None:
+    def new_subscribe(self, channel: str, symbol: str,
+                      interval: str = None) -> None:
         pass
 
     @abstractmethod
@@ -187,9 +188,7 @@ class CryptoExchange(ABC):
         return
 
     @abstractmethod
-    def _process_dicision(
-        self, strategy: 'Strategy', decision: str, latest_price: float
-    ):
+    def _process_dicision(self, strategy: 'Strategy', decision: str):
         pass
 
     @abstractmethod
