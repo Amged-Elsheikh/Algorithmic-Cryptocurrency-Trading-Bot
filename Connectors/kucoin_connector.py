@@ -8,7 +8,7 @@ import os
 import random
 import string
 import time
-from typing import TYPE_CHECKING, Dict, Union
+from typing import TYPE_CHECKING, Dict, Union, Literal
 
 import requests
 import websocket
@@ -269,11 +269,16 @@ class KucoinClient(CryptoExchange):
             # Add sleeping interval
             time.sleep(3)
 
-    def new_subscribe(self, channel: str, symbol: str, interval: str = None):
+    def new_subscribe(
+        self,
+        channel: Literal["tickers", "candles"],
+        symbol: str,
+        interval: Union[str, None] = None,
+    ):
         contract = self.contracts[symbol]
-        if channel == "/market/ticker":
+        if channel == "tickers":
             self._bookTicket_subscribe(contract)
-        elif channel == "/market/candles":
+        elif channel == "candles":
             self._kline_subscribe(contract, interval)
 
     def _bookTicket_subscribe(self, contract: Contract):
@@ -313,6 +318,7 @@ class KucoinClient(CryptoExchange):
             "privateChannel": False,
             "response": False,
         }
+
         # Subscribe to the websocket channel
         self._ws.send(json.dumps(msg))
         self.strategy_counter[strategy_key] = {"count": 1, "id": self.id}
@@ -322,14 +328,14 @@ class KucoinClient(CryptoExchange):
 
     def unsubscribe_channel(
         self,
-        channel,
+        channel: Literal["tickers", "candles"],
         *,
         symbol: str = None,
         strategy: "Strategy" = None,
     ):
-        if channel == "/market/candles":
+        if channel == "candles":
             self._kline_unsubscribe(strategy)
-        elif channel == "/market/ticker":
+        elif channel == "tickers":
             running_contracts = list(
                 map(lambda x: x.split("_")[0], self.strategy_counter.keys())
             )
@@ -363,7 +369,7 @@ class KucoinClient(CryptoExchange):
         self.running_startegies.pop(strategy.strategy_key)
         self.strategy_counter[counters_key]["count"] -= 1
         if self.strategy_counter[counters_key]["count"] == 0:
-            channel = f"/market/candles:{strategy.strategy_key}"
+            channel = f"/market/candles:{strategy.symbol}_{strategy.interval}"
             msg = {
                 "id": self.strategy_counter[counters_key]["id"],
                 "type": "unsubscribe",
