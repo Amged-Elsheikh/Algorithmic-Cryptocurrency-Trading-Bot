@@ -33,18 +33,16 @@ class BinanceClient(CryptoExchange):
         return client
 
     def __init__(self, is_spot: bool, is_test: bool):
-        self._init(is_spot, is_test)
-        self._header = {
-            "X-MBX-APIKEY": os.getenv(self._api_key),
-            "Content-Type": "application/json",
-        }
+        self.is_spot = is_spot
+        self.is_test = is_test
+        self._init(self)
         self.logger = logging.getLogger(__name__)
         super().__init__()
         self._check_internet_connection()
         self.contracts = self._get_contracts()
         self.prices: Dict[str, Price] = dict()
 
-    def _init(self, is_spot: bool, is_test: bool):
+    def _init(self):
         urls = {
             (True, True): (
                 "https://testnet.binance.vision/api",
@@ -55,24 +53,28 @@ class BinanceClient(CryptoExchange):
                 "wss://stream.binance.com:9443/ws",
             ),
             (False, True): (
-                "https://testnet.binancefuture.com",
+                "https://testnet.binancefuture.com/fapi",
                 "wss://stream.binancefuture.com/ws",
             ),
             (False, False): (
-                "https://fapi.binance.com",
+                "https://fapi.binance.com/fapi",
                 "wss://fstream.binance.com/ws",
             ),
         }
-        self._base_url, self._ws_url = urls[(is_spot, is_test)]
-        spot_future = "Spot" if is_spot else "Future"
-        real_test = "Test" if is_test else ""
+        self._base_url, self._ws_url = urls[(self.is_spot, self.is_test)]
+        spot_future = "Spot" if self.is_spot else "Future"
+        real_test = "Test" if self.is_test else ""
         self._api_key = f"{self.exchange}{spot_future}{real_test}APIKey"
         self._api_secret = self._api_key.replace("APIKey", "APISecret")
         return
 
     @property
     def _is_connected(self):
-        response = self._execute_request("/fapi/v1/ping", "GET")
+        if self.is_spot:
+            endpoint = '/v3/ping'
+        else:
+            endpoint = '/v1/ping'
+        response = self._execute_request(endpoint, "GET")
         try:
             response.raise_for_status()
             return True
@@ -104,11 +106,15 @@ class BinanceClient(CryptoExchange):
             params["timestamp"] = int(time.time() * 1000)
             # Generate the signature for the query
             params["signature"] = self._generate_signature(urlencode(params))
+            _header = {
+                "X-MBX-APIKEY": os.getenv(self._api_key),
+                "Content-Type": "application/json"
+                }
             response = requests.request(
                 method=http_method,
                 url=self._base_url + endpoint,
                 params=params,
-                headers=self._header,
+                headers=_header,
             )
             response.raise_for_status()
             return response
@@ -127,7 +133,11 @@ class BinanceClient(CryptoExchange):
 
     # ###################### MARKET DATA FUNCTION #######################
     def _get_contracts(self):
-        response = self._execute_request("/fapi/v1/exchangeInfo", "GET")
+        if self.is_spot:
+            endpoint = '"/v3/exchangeInfo"'
+        else:
+            endpoint = '"/v1/exchangeInfo"'
+        response = self._execute_request(endpoint, "GET")
         if response:
             symbols = response.json()["symbols"]
             contracts = {
@@ -141,8 +151,12 @@ class BinanceClient(CryptoExchange):
         """
         Get a list of the historical Candlestickes for given contract.
         """
+        if self.is_spot:
+            endpoint = '/v3/klines'
+        else:
+            endpoint = '/v1/klines'
         params = {"symbol": contract.symbol, "interval": interval}
-        response = self._execute_request("/fapi/v1/klines", "GET", params)
+        response = self._execute_request(endpoint, "GET", params)
         if response:
             return [CandleStick(candle, self.exchange)
                     for candle in response.json()]
@@ -150,10 +164,12 @@ class BinanceClient(CryptoExchange):
 
     def get_price(self, contract: Contract):
         """Get the latest traded price for the contract."""
+        if self.is_spot:
+            endpoint = '/v3/ticker/bookTicker'
+        else:
+            endpoint = '/v1/ticker/bookTicker'
         params = {"symbol": contract.symbol}
-        response = self._execute_request(
-            "/fapi/v1/ticker/bookTicker", "GET", params
-            )
+        response = self._execute_request(endpoint, "GET", params)
         if response:
             symbol = contract.symbol
             self.prices[symbol] = Price(response.json(), self.exchange)
@@ -170,19 +186,27 @@ class BinanceClient(CryptoExchange):
         within the connecter, when a buying or selling signal is found,
         or when canceling the runnning strategy
         """
+        if self.is_spot:
+            endpoint = '/v3/order'
+        else:
+            endpoint = '/v1/order'
         # Add the mandotary parameters
         params = {"symbol": contract.symbol, "side": side, "type": order_type}
         # Add extra parameters
         params.update(kwargs)
-        response = self._execute_request("/fapi/v1/order", "POST", params)
+        response = self._execute_request(endpoint, "POST", params)
         if response:
             return Order(response.json(), self.exchange)
         return None
 
     def order_status(self, order: Order):
         """Get information of a given order."""
+        if self.is_spot:
+            endpoint = '/v3/order'
+        else:
+            endpoint = '/v1/order'
         params = {"symbol": order.symbol, "orderId": order.orderId}
-        response = self._execute_request("/fapi/v1/order", "GET", params)
+        response = self._execute_request(endpoint, "GET", params)
         if response:
             return Order(response.json(), self.exchange)
         return None
@@ -191,8 +215,12 @@ class BinanceClient(CryptoExchange):
         """
         Deleting an order. This argument is helpful for future trades,
         or when applying LIMIT/OCO orders."""
+        if self.is_spot:
+            endpoint = '/v3/order'
+        else:
+            endpoint = '/v1/order'
         params = {"symbol": order.symbol, "orderId": order.orderId}
-        response = self._execute_request("/fapi/v1/order", "DELETE", params)
+        response = self._execute_request(endpoint, "DELETE", params)
         if response:
             return Order(response.json(), self.exchange)
         return None
@@ -203,7 +231,11 @@ class BinanceClient(CryptoExchange):
         """
         Return the amount of the currently holded assests in the wallet
         """
-        response = self._execute_request("/fapi/v2/account", "GET")
+        if self.is_spot:
+            endpoint = '/v3/account'
+        else:
+            endpoint = '/v2/account'
+        response = self._execute_request(endpoint, "GET")
         if response:
             balance = {
                 asset["asset"]: Balance(asset, self.exchange)
