@@ -14,14 +14,11 @@ from strategies import intervals_to_sec
 
 # Helpful Functions
 def get_contracts(clients: Dict[str, 'CryptoExchange']) -> Dict[str, Contract]:
-    contracts = dict()
-    for exchange, client in clients.items():
-        contracts.update(
-            {
-                f'{exchange} {symbol}': contract
-                for symbol, contract in client.contracts.items()
-            }
-        )
+    contracts = {
+        f'{exchange} {symbol}': contract
+        for exchange, client in clients.items()
+        for symbol, contract in client.contracts.items()
+    }
     return contracts
 
 
