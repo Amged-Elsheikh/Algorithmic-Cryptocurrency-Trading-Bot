@@ -94,8 +94,10 @@ class Balance:
         if exchange == "Binance":
             self.asset: str = response["asset"]  # USDT
             self.pnl = float(response["unrealizedProfit"])
+            self.balance = float(response["balance"])
             self.availableBalance = float(response["availableBalance"])
         elif exchange == "Kucoin":
             self.asset: str = response["currency"]  # USDT
             self.pnl = None
+            self.balance = float(response["balance"])
             self.availableBalance = float(response["available"])
