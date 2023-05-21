@@ -4,12 +4,16 @@ import dash_bootstrap_components as dbc
 from dash import Dash, dcc, html
 
 from Connectors.binance_connector import BinanceClient
+from Connectors.kucoin_connector import KucoinClient
 from dashboard.dashboard_ui import (bottom_container, footer, middel_container,
                                     nav_bar, technical_modal, upper_container)
 if TYPE_CHECKING:
     from Connectors.crypto_base_class import CryptoExchange
 
-clients = {'Binance': BinanceClient(is_spot=False, is_test=True)}
+clients: Dict[str, 'CryptoExchange']
+clients = {'Binance': BinanceClient(is_spot=False, is_test=True),
+           'Kucoin': KucoinClient(is_spot=True, is_test=False),
+           }
 
 
 def main(clients: Dict[str, 'CryptoExchange']):
