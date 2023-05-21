@@ -5,7 +5,7 @@ import logging
 import logging.config
 import os
 import time
-from typing import TYPE_CHECKING, Dict, Union
+from typing import TYPE_CHECKING, Dict, Union, Literal
 from urllib.parse import urlencode
 
 import requests
@@ -47,15 +47,23 @@ class BinanceClient(CryptoExchange):
 
     def _init(self, is_spot: bool, is_test: bool):
         urls = {
-            (True, True): ('https://testnet.binance.vision/api',
-                           'wss://testnet.binance.vision/ws'),
-            (True, False): ('https://api.binance.com/api',
-                            'wss://stream.binance.com:9443/ws'),
-            (False, True): ('https://testnet.binancefuture.com',
-                            'wss://stream.binancefuture.com/ws'),
-            (False, False): ('https://fapi.binance.com',
-                             'wss://fstream.binance.com/ws'),
-            }
+            (True, True): (
+                'https://testnet.binance.vision/api',
+                'wss://testnet.binance.vision/ws',
+            ),
+            (True, False): (
+                'https://api.binance.com/api',
+                'wss://stream.binance.com:9443/ws',
+            ),
+            (False, True): (
+                'https://testnet.binancefuture.com',
+                'wss://stream.binancefuture.com/ws',
+            ),
+            (False, False): (
+                'https://fapi.binance.com',
+                'wss://fstream.binance.com/ws',
+            ),
+        }
         self._base_url, self._ws_url = urls[(is_spot, is_test)]
         spot_future = 'Spot' if is_spot else 'Future'
         real_test = 'Test' if is_test else ''
@@ -66,10 +74,8 @@ class BinanceClient(CryptoExchange):
     @property
     def _is_connected(self):
         response = self._execute_request(
-            endpoint='/fapi/v1/ping',
-            params=dict(),
-            http_method='GET'
-            )
+            endpoint='/fapi/v1/ping', params=dict(), http_method='GET'
+        )
         try:
             response.raise_for_status()
             return True
@@ -107,8 +113,8 @@ class BinanceClient(CryptoExchange):
                 method=http_method,
                 url=self._base_url + endpoint,
                 params=params,
-                headers=self._header
-                )
+                headers=self._header,
+            )
             response.raise_for_status()
             return response
         except RequestException as e:
@@ -128,10 +134,8 @@ class BinanceClient(CryptoExchange):
     def _get_contracts(self) -> Dict[str, Contract] | None:
         '''Return all exchange contracts.'''
         response = self._execute_request(
-            endpoint='/fapi/v1/exchangeInfo',
-            params=dict(),
-            http_method='GET'
-            )
+            endpoint='/fapi/v1/exchangeInfo', params=dict(), http_method='GET'
+        )
         if response:
             symbols = response.json()['symbols']
             contracts = {
@@ -147,13 +151,13 @@ class BinanceClient(CryptoExchange):
         '''
         params = {'symbol': contract.symbol, 'interval': interval}
         response = self._execute_request(
-            endpoint='/fapi/v1/klines',
-            params=params,
-            http_method='GET'
-            )
+            endpoint='/fapi/v1/klines', params=params, http_method='GET'
+        )
         if response:
-            return [CandleStick(candle, exchange=self.exchange)
-                    for candle in response.json()]
+            return [
+                CandleStick(candle, exchange=self.exchange)
+                for candle in response.json()
+            ]
         return None
 
     def get_price(self, contract: Contract) -> Price | None:
@@ -164,14 +168,14 @@ class BinanceClient(CryptoExchange):
             http_method='GET',
         )
         if response:
-            self.prices[contract.symbol] = Price(response.json(),
-                                                 exchange=self.exchange)
+            self.prices[contract.symbol] = Price(
+                response.json(), exchange=self.exchange
+            )
             return self.prices[contract.symbol]
         return None
 
     # ######################### TRADE Arguments ##########################
-    def make_order(self, contract: Contract, *,
-                   side: str, order_type: str, **kwargs):
+    def make_order(self, contract: Contract, *, side: str, order_type: str, **kwargs):
         '''
         Make a Buy/Long or Sell/Short order for a given contract.
         This argument is a private argument and can only be accesed
@@ -179,17 +183,12 @@ class BinanceClient(CryptoExchange):
         or when canceling the runnning strategy
         '''
         # Add the mandotary parameters
-        params = {
-            'symbol': contract.symbol,
-            'side': side,
-            'type': order_type}
+        params = {'symbol': contract.symbol, 'side': side, 'type': order_type}
         # Add extra parameters
         params.update(kwargs)
         response = self._execute_request(
-            endpoint='/fapi/v1/order',
-            params=params,
-            http_method='POST'
-            )
+            endpoint='/fapi/v1/order', params=params, http_method='POST'
+        )
         if response:
             return Order(response.json(), exchange=self.exchange)
         return None
@@ -198,10 +197,8 @@ class BinanceClient(CryptoExchange):
         '''Get information of a given order.'''
         params = {'symbol': order.symbol, 'orderId': order.orderId}
         response = self._execute_request(
-            endpoint='/fapi/v1/order',
-            params=params,
-            http_method='GET'
-            )
+            endpoint='/fapi/v1/order', params=params, http_method='GET'
+        )
         if response:
             return Order(response.json(), exchange=self.exchange)
         return None
@@ -212,9 +209,7 @@ class BinanceClient(CryptoExchange):
         or when applying LIMIT/OCO orders.'''
         params = {'symbol': order.symbol, 'orderId': order.orderId}
         response = self._execute_request(
-            endpoint='/fapi/v1/order',
-            params=params,
-            http_method='DELETE'
+            endpoint='/fapi/v1/order', params=params, http_method='DELETE'
         )
         if response:
             return Order(response.json(), exchange=self.exchange)
@@ -227,13 +222,13 @@ class BinanceClient(CryptoExchange):
         Return the amount of the currently holded assests in the wallet
         '''
         response = self._execute_request(
-            endpoint='/fapi/v2/account',
-            http_method='GET',
-            params=dict()
-            )
+            endpoint='/fapi/v2/account', http_method='GET', params=dict()
+        )
         if response:
-            balance = {asset['asset']: Balance(asset, exchange=self.exchange)
-                       for asset in response.json()['assets']}
+            balance = {
+                asset['asset']: Balance(asset, exchange=self.exchange)
+                for asset in response.json()['assets']
+            }
             return balance
         return None
 
@@ -259,28 +254,26 @@ class BinanceClient(CryptoExchange):
         else:
             return
 
-    def new_subscribe(self, channel='bookTicker', symbol='BTCUSDT',
-                      interval: str = None):
-        params = f'{symbol.lower()}@{channel}'
+    def new_subscribe(
+        self,
+        channel: Literal['tickers', 'candles'],
+        symbol='BTCUSDT',
+        interval: str = None,
+    ):
         contract = self.contracts[symbol]
-        if channel == 'bookTicker':
+        if channel == 'tickers':
+            params = f'{symbol.lower()}@bookTicker'
             self._bookTicket_subscribe(contract, params)
-        elif channel == 'kline':
-            params += f'_{interval}'
+        elif channel == 'candles':
+            params = f'{symbol.lower()}@kline_{interval}'
             self._kline_subscribe(contract, params)
 
     def _bookTicket_subscribe(self, contract: Contract, params: str):
         if contract in self.bookTicker_subscribtion_list:
-            self.add_log(
-                msg=f'Already subscribed to {params} channel', level='info'
-            )
+            self.add_log(msg=f'Already subscribed to {params}', level='info')
             return
         else:
-            msg = {
-                'method': 'SUBSCRIBE',
-                'params': [params],
-                'id': self.id
-                }
+            msg = {'method': 'SUBSCRIBE', 'params': [params], 'id': self.id}
             # immediatly show current bid and ask prices.
             self.get_price(contract)
             # Subscribe to the websocket channel
@@ -292,49 +285,41 @@ class BinanceClient(CryptoExchange):
     def _kline_subscribe(self, contract: Contract, params: str):
         # Make sure the contract is in the bookTicker.
         symbol = contract.symbol
-        interval = params.split('_')[1]
+        interval = params.split('_')[-1]
         strategy_key = f'{symbol}_{interval}'
 
         if contract not in self.bookTicker_subscribtion_list:
-            self._bookTicket_subscribe(
-                contract,
-                params=f'{symbol.lower}_@bookTicker')
-
+            self._bookTicket_subscribe(contract, f'{symbol.lower}_@bookTicker')
         if strategy_key in self.strategy_counter:
             self.strategy_counter[strategy_key]['count'] += 1
-            self.add_log(
-                msg=f'Already subscribed to {params} channel', level='info'
-            )
-        else:
-            msg = {
-                'method': 'SUBSCRIBE',
-                'params': [params],
-                'id': self.id
-                }
-            # Subscribe to the websocket channel
-            self._ws.send(json.dumps(msg))
-            self.strategy_counter[strategy_key] = {'count': 1,
-                                                   'id': self.id}
-            # Update the aggTrade list from the strategy object
-            self.id += 1
+            self.add_log(msg=f'Already subscribed to {params}', level='info')
+            return
+        msg = {'method': 'SUBSCRIBE', 'params': [params], 'id': self.id}
+        # Subscribe to the websocket channel
+        self._ws.send(json.dumps(msg))
+        self.strategy_counter[strategy_key] = {'count': 1, 'id': self.id}
+        # Update the aggTrade list from the strategy object
+        self.id += 1
         return
 
     def unsubscribe_channel(
         self,
-        channel='bookTicker',
+        channel: Literal['tickers', 'candles'],
         *,
         symbol: Union[str, None] = None,
         strategy: Union['Strategy', None] = None,
     ):
-        if channel == 'kline':
+        if channel == 'candles':
             self._kline_unsubscribe(strategy)
-        elif channel == 'bookTicker':
-            running_contracts = list(map(lambda x: x.split('_')[0],
-                                         self.strategy_counter.keys()))
+        elif channel == 'tickers':
+            running_contracts = list(
+                map(lambda x: x.split('_')[0], self.strategy_counter.keys())
+            )
             if symbol in running_contracts:
                 msg = (
-                    f"{symbol} had a running strategy and "
-                    "can't be removed from the watchlist")
+                    f'{symbol} had a running strategy and '
+                    "can't be removed from the watchlist"
+                )
                 self.add_log(msg=msg, level='info')
                 return
             self._bookTicker_unsubscribe(symbol)
@@ -343,10 +328,10 @@ class BinanceClient(CryptoExchange):
     def _bookTicker_unsubscribe(self, symbol: str):
         _id = self.bookTicker_subscribtion_list[self.contracts[symbol]]
         msg = {
-                'method': 'UNSUBSCRIBE',
-                'params': [f'{symbol.lower()}@bookTicker'],
-                'id': _id
-                }
+            'method': 'UNSUBSCRIBE',
+            'params': [f'{symbol.lower()}@bookTicker'],
+            'id': _id,
+        }
         self._ws.send(json.dumps(msg))
         self.bookTicker_subscribtion_list.pop(self.contracts[symbol])
         self.prices.pop(symbol)
@@ -359,10 +344,10 @@ class BinanceClient(CryptoExchange):
         self.strategy_counter[counters_key]['count'] -= 1
         if self.strategy_counter[counters_key]['count'] == 0:
             msg = {
-                    'method': 'UNSUBSCRIBE',
-                    'params': [f'{symbol.lower()}@kline_{strategy.interval}'],
-                    'id': self.strategy_counter[counters_key]['id'],
-                    }
+                'method': 'UNSUBSCRIBE',
+                'params': [f'{symbol.lower()}@kline_{strategy.interval}'],
+                'id': self.strategy_counter[counters_key]['id'],
+            }
             self._ws.send(json.dumps(msg))
             self.strategy_counter.pop(counters_key)
             return
@@ -383,8 +368,7 @@ class BinanceClient(CryptoExchange):
             if symbol == strategy.symbol and hasattr(strategy, 'order'):
                 if strategy.order.status in ['NEW', 'PARTIALLY_FILLED']:
                     strategy.order = self.order_status(strategy.order)
-                elif strategy.order.status in ['CANCELED', 'REJECTED',
-                                               'EXPIRED']:
+                elif strategy.order.status in ['CANCELED', 'REJECTED', 'EXPIRED']:
                     self._kline_unsubscribe(strategy=strategy)
                     continue
                 if strategy.order.status == 'FILLED':
@@ -417,8 +401,7 @@ class BinanceClient(CryptoExchange):
             if not hasattr(strategy, 'order'):
                 latest_price = strategy.df['close'].iloc[-1]
                 # Binance don't allow less than 10$ transaction
-                min_qty_margin = max(10 / latest_price,
-                                     strategy.contract.minQuantity)
+                min_qty_margin = max(10 / latest_price, strategy.contract.minQuantity)
                 # USDT or BUSD, etc..
                 base_asset = strategy.contract.quoteAsset
                 # get the balance information
@@ -470,7 +453,7 @@ class BinanceClient(CryptoExchange):
             quantity=strategy.order.quantity,
         )
         if sell_order:
-            while sell_order.status != "FILLED":
+            while sell_order.status != 'FILLED':
                 sell_order = self.order_status(sell_order)
                 # time.sleep(2)
             strategy.relaizedPnL += strategy._PnLcalciator(sell_order)
