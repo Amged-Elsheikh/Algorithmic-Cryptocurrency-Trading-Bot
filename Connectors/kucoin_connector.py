@@ -209,7 +209,7 @@ class KucoinClient(CryptoExchange):
         Deleting an order. This argument is helpful for future trades,
         or when applying LIMIT/OCO orders."""
         order_id = order.orderId if isinstance(order, Order) else order
-        response = self._execute_request(f"/api/v1/orders/{order_id}", "DELETE")
+        response = self._execute_request(f"/api/v1/orders/{order_id}", dict(), "DELETE")
         if response:
             return Order(response.json()["data"], self.exchange)
         return None
@@ -220,11 +220,12 @@ class KucoinClient(CryptoExchange):
         """
         Return the amount of the currently holded assests in the wallet
         """
-        response = self._execute_request("/api/v1/accounts", {"type": "trade"}, "GET")
+        response = self._execute_request("/api/v1/accounts", dict(), "GET")
         if response:
             balance = {
                 asset["currency"]: Balance(asset, self.exchange)
                 for asset in response.json()["data"]
+                if asset["type"] == "trade"
             }
             return balance
         return None
