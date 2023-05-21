@@ -61,9 +61,6 @@ class Strategy(ABC):
         self.client.running_startegies[self.strategy_key] = self
         Strategy.new_strategy_id += 1
         self.order: Order
-        """
-        Used to remove the strategy from the connector after it's been closed
-        """
         self.relaizedPnL = 0
         self.unpnl = 0
         self.tp = tp
