@@ -47,25 +47,23 @@ class Strategy(ABC):
         # running_strategies variable is a dictionary where the key is the
         # symbol and the values is another
         self.client = client
-        # To unsubscribe a channel in binance, you need to provide an id
         self.symbol = symbol
         self.contract = self.client.contracts[symbol]
-        self.candles = self.client.get_candlestick(self.contract, interval)
-        self.interval = interval
-        interval = re.match(r'[0-9]+[a-zA-Z]', interval).group(0)
-        self.timeframe = intervals_to_sec[interval] * 1000
-        self.client.new_subscribe('candles', symbol, interval)
-        self.client.add_log(msg="Strategy added succesfully.", level="info")
-        self.ws_channel_key = f"{symbol}_{interval}"
-        self.strategy_key = f"{self.ws_channel_key}_{Strategy.new_strategy_id}"
-        self.client.running_startegies[self.strategy_key] = self
-        Strategy.new_strategy_id += 1
-        self.order: Order
         self.relaizedPnL = 0
         self.unpnl = 0
         self.tp = tp
         self.sl = sl
         self.buy_pct = buy_pct
+        self.interval = interval
+        interval = re.match(r"[0-9]+[a-zA-Z]", interval).group(0)
+        self.timeframe = intervals_to_sec[interval] * 1000
+        self.client.new_subscribe("candles", symbol, self.interval)
+        self.client.add_log("Strategy added succesfully.", "info")
+        self.ws_channel_key = f"{symbol}_{interval}"
+        self.strategy_key = f"{self.ws_channel_key}_{Strategy.new_strategy_id}"
+        self.client.running_startegies[self.strategy_key] = self
+        Strategy.new_strategy_id += 1
+        self.candles = self.client.get_candlestick(self.contract, interval)
         data = [
             {
                 "timestamp": candle.timestamp,
@@ -78,6 +76,7 @@ class Strategy(ABC):
             for candle in self.candles
         ]
         self.df = pd.DataFrame(data)
+        self.order: Order
 
     def _update_candles(self, new_candle: CandleStick):
         last_candle = self.df.iloc[-1]

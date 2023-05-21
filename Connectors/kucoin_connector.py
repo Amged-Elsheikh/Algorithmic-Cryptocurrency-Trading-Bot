@@ -14,7 +14,6 @@ import requests
 import websocket
 from dotenv import load_dotenv
 from requests.exceptions import RequestException
-from requests.models import Response
 
 from Connectors.crypto_base_class import CryptoExchange
 from Moduls.data_modul import Balance, CandleStick, Contract, Order, Price
@@ -62,7 +61,7 @@ class KucoinClient(CryptoExchange):
 
     @property
     def _is_connected(self):
-        response = self._execute_request("/api/v1/timestamp", dict(), "GET")
+        response = self._execute_request("/api/v1/timestamp", "GET")
         try:
             response.raise_for_status()
             return True
@@ -77,19 +76,17 @@ class KucoinClient(CryptoExchange):
                 time.sleep(3)
             else:
                 msg = f"{self.exchange} Client failed to connect"
-                self.add_log(msg=msg, level="warning")
+                self.add_log(msg, "warning")
                 raise Exception(msg)
         msg = "Internet connection established"
-        self.add_log(msg=msg, level="info")
+        self.add_log(msg, "info")
         return True
 
     @property
     def exchange(self):
         return "Kucoin"
 
-    def _execute_request(
-        self, endpoint: str, params: Dict, http_method: str
-    ) -> Response | None:
+    def _execute_request(self, endpoint: str, http_method: str, params=dict()):
         """This argument is used to send all types of requests to the server"""
         try:
             now = str(int(time.time() * 1000))
@@ -121,9 +118,9 @@ class KucoinClient(CryptoExchange):
             response.raise_for_status()
             return response
         except RequestException as e:
-            self.add_log(msg=f"Request error {e}", level="warning")
+            self.add_log(f"Request error {e}", "warning")
         except Exception as e:
-            self.add_log(msg=f"Error {e}", level="error")
+            self.add_log(f"Error {e}", "error")
         return None
 
     def _generate_signature(self, query_string: str):
@@ -137,12 +134,12 @@ class KucoinClient(CryptoExchange):
 
     # ###################### MARKET DATA FUNCTION #######################
     def _get_contracts(self) -> Dict[str, Contract] | None:
-        """Return all exchange contracts."""
-        response = self._execute_request("/api/v2/symbols", dict(), "GET")
+        response = self._execute_request("/api/v2/symbols", "GET")
         if response:
             symbols = response.json()["data"]
             contracts = {
-                symbol["symbol"]: Contract(symbol, self.exchange) for symbol in symbols
+                symbol["symbol"]: Contract(symbol, self.exchange)
+                for symbol in symbols
             }
             return contracts
         return None
@@ -152,7 +149,9 @@ class KucoinClient(CryptoExchange):
         Get a list of the historical Candlestickes for given contract.
         """
         params = {"symbol": contract.symbol, "type": interval}
-        response = self._execute_request("/api/v1/market/candles", params, "GET")
+        response = self._execute_request(
+            "/api/v1/market/candles", "GET", params
+            )
         if response:
             return [
                 CandleStick(candle, self.exchange)
@@ -160,13 +159,11 @@ class KucoinClient(CryptoExchange):
             ]
         return None
 
-    def get_price(self, contract: Contract) -> Price | None:
-        """Get the latest traded price for the contract."""
+    def get_price(self, contract: Contract):
         symbol = contract.symbol
+        params = {"symbol": symbol}
         response = self._execute_request(
-            "/api/v1/market/orderbook/level1",
-            {"symbol": symbol},
-            "GET",
+            "/api/v1/market/orderbook/level1", "GET", params
         )
         if response:
             self.prices[symbol] = Price(response.json()["data"], self.exchange)
@@ -175,7 +172,9 @@ class KucoinClient(CryptoExchange):
         return None
 
     # ######################### TRADE Arguments ##########################
-    def make_order(self, contract: Contract, *, side: str, order_type: str, **kwargs):
+    def make_order(
+        self, contract: Contract, *, side: str, order_type: str, **kwargs
+    ):
         """
         Make a Buy/Long or Sell/Short order for a given contract.
         This argument is a private argument and can only be accesed
@@ -191,15 +190,14 @@ class KucoinClient(CryptoExchange):
         }
         # Add extra parameters
         params.update(kwargs)
-        response = self._execute_request("/api/v1/orders", params, "POST")
+        response = self._execute_request("/api/v1/orders", "POST", params)
         if response:
             return self.order_status(response.json()["data"]["orderId"])
         return None
 
     def order_status(self, order: Union[Order, str]):
-        """Get information of a given order."""
         order_id = order.orderId if isinstance(order, Order) else order
-        response = self._execute_request(f"/api/v1/orders/{order_id}", dict(), "GET")
+        response = self._execute_request(f"/api/v1/orders/{order_id}", "GET")
         if response:
             return Order(response.json()["data"], self.exchange)
         return None
@@ -208,8 +206,8 @@ class KucoinClient(CryptoExchange):
         """
         Deleting an order. This argument is helpful for future trades,
         or when applying LIMIT/OCO orders."""
-        order_id = order.orderId if isinstance(order, Order) else order
-        response = self._execute_request(f"/api/v1/orders/{order_id}", dict(), "DELETE")
+        _id = order.orderId if isinstance(order, Order) else order
+        response = self._execute_request(f"/api/v1/orders/{_id}", "DELETE")
         if response:
             return Order(response.json()["data"], self.exchange)
         return None
@@ -220,7 +218,7 @@ class KucoinClient(CryptoExchange):
         """
         Return the amount of the currently holded assests in the wallet
         """
-        response = self._execute_request("/api/v1/accounts", dict(), "GET")
+        response = self._execute_request("/api/v1/accounts", "GET")
         if response:
             balance = {
                 asset["currency"]: Balance(asset, self.exchange)
@@ -232,7 +230,7 @@ class KucoinClient(CryptoExchange):
 
     @balance.setter
     def balance(self, *args, **kwargs):
-        self.add_log(msg="Balance can't be edited manually", level="warning")
+        self.add_log("Balance can't be edited manually", "warning")
         return self.balance
 
     # ########################### Websocket Arguments ########################
@@ -240,7 +238,7 @@ class KucoinClient(CryptoExchange):
         # Reopen the websocket connection if it terminated
         ws_init = None
         while ws_init is None:
-            ws_init = self._execute_request("/api/v1/bullet-public", dict(), "POST")
+            ws_init = self._execute_request("/api/v1/bullet-public", "POST")
             if ws_init is None:
                 time.sleep(3)
         token = ws_init.json()["data"]["token"]
@@ -262,10 +260,8 @@ class KucoinClient(CryptoExchange):
                     break
             except Exception as e:
                 # Update the log about this error
-                self.add_log(
-                    msg=f"{self.exchange} error in run_forever() method: {e}",
-                    level="warning",
-                )
+                msg = f"{self.exchange} error in run_forever() method: {e}"
+                self.add_log(msg, "warning")
             # Add sleeping interval
             time.sleep(3)
 
@@ -273,7 +269,7 @@ class KucoinClient(CryptoExchange):
         self,
         channel: Literal["tickers", "candles"],
         symbol: str,
-        interval: Union[str, None] = None,
+        interval: str = None,
     ):
         contract = self.contracts[symbol]
         if channel == "tickers":
@@ -282,9 +278,9 @@ class KucoinClient(CryptoExchange):
             self._kline_subscribe(contract, interval)
 
     def _bookTicket_subscribe(self, contract: Contract):
-        channel = f"/market/ticker:{contract.symbol}"
+        channel = f"/ticker:{contract.symbol}"
         if contract in self.bookTicker_subscribtion_list:
-            self.add_log(msg=f"Already subscribed to {channel}", level="info")
+            self.add_log(f"Already subscribed to {channel}", "info")
             return
         msg = {
             "id": self.id,
@@ -309,7 +305,7 @@ class KucoinClient(CryptoExchange):
             self._bookTicket_subscribe(contract)
         if strategy_key in self.strategy_counter:
             self.strategy_counter[strategy_key]["count"] += 1
-            self.add_log(msg=f"Already subscribed to {channel}", level="info")
+            self.add_log(f"Already subscribed to {channel}", "info")
             return
         msg = {
             "id": self.id,
@@ -322,7 +318,6 @@ class KucoinClient(CryptoExchange):
         # Subscribe to the websocket channel
         self._ws.send(json.dumps(msg))
         self.strategy_counter[strategy_key] = {"count": 1, "id": self.id}
-        # Update the aggTrade list from the strategy object
         self.id += 1
         return
 
@@ -344,7 +339,7 @@ class KucoinClient(CryptoExchange):
                     f"{symbol} had a running strategy and "
                     "can't be removed from the watchlist"
                 )
-                self.add_log(msg=msg, level="info")
+                self.add_log(msg, "info")
                 return
             self._bookTicker_unsubscribe(symbol)
         return
@@ -416,7 +411,7 @@ class KucoinClient(CryptoExchange):
                 if strategy.order.status in ["new", "partially_filled"]:
                     strategy.order = self.order_status(strategy.order)
                 elif strategy.order.status == "canceled":
-                    self._kline_unsubscribe(strategy=strategy)
+                    self._kline_unsubscribe(strategy)
                     continue
                 if strategy.order.status == "filled":
                     # Calculate the uPnL only when an order is made
@@ -443,52 +438,40 @@ class KucoinClient(CryptoExchange):
         return
 
     def _process_dicision(self, strategy: "Strategy", decision: str):
-        if decision == "buy or hodl":
-            if not hasattr(strategy, "order"):
-                latest_price = strategy.df["close"].iloc[-1]
-                # Binance don't allow less than 10$ transaction
-                min_qty_margin = 10 / latest_price
-                # USDT or BUSD, etc..
-                base_asset = strategy.contract.quoteAsset
-                # get the balance information
-                balance = self.balance[base_asset].availableBalance
-                # Calculate the desired money for trade
-                buy_margin = balance * strategy.buy_pct
-                # calculate order quantity and apply 5% negative slippage
-                quantity_margin = (buy_margin / latest_price) * 0.95
-                quantity_margin = round(
-                    quantity_margin, strategy.contract.quantityPrecision
+        if decision == "buy or hodl" and hasattr(strategy, "order"):
+            latest_price = strategy.df["close"].iloc[-1]
+            min_qty = 10 / latest_price
+            base_asset = strategy.contract.quoteAsset
+            balance = self.balance[base_asset].availableBalance
+            buy_margin = balance * strategy.buy_pct
+            quantity_margin = (buy_margin / latest_price) * 0.95
+            quantity_margin = round(
+                quantity_margin, strategy.contract.quantityPrecision
+            )
+            if quantity_margin > min_qty:
+                order = self.make_order(
+                    strategy.contract,
+                    side="buy",
+                    order_type="market",
+                    size=quantity_margin,
                 )
-                if quantity_margin > min_qty_margin:
-                    order = self.make_order(
-                        strategy.contract,
-                        side="buy",
-                        order_type="market",
-                        size=quantity_margin,
-                    )
-                    if order:
-                        strategy.order = order
-                        msg = (
-                            f"{strategy.order.symbol} buying order was made. "
-                            f"Quantity: {strategy.order.quantity}. "
-                            f"Price: {strategy.order.price}"
-                        )
-                        self.add_log(msg=msg, level="info")
-                else:
+                if order:
+                    strategy.order = order
                     msg = (
-                        f"could not buy {self.strategy.contract.symbol}"
-                        "because the ordered quantity is less than the"
-                        "minimum margin"
+                        f"{strategy.order.symbol} buying order was made. "
+                        f"Quantity: {strategy.order.quantity}. "
+                        f"Price: {strategy.order.price}"
                     )
-                    self.add_log(msg=msg, level="info")
+                    self.add_log(msg, "info")
             else:
-                pass  # Hold the assets
-        elif decision == "sell or don't enter":
-            if hasattr(strategy, "order"):
-                # sell when there is an existing order and poor indicators
-                self._sell_strategy_asset(strategy)
-            else:
-                pass  # Do not enter
+                msg = (
+                    f"could not buy {self.strategy.contract.symbol}"
+                    "because the ordered quantity is less than the"
+                    "minimum margin"
+                )
+                self.add_log(msg, "info")
+        elif decision == "sell or don't enter" and hasattr(strategy, "order"):
+            self._sell_strategy_asset(strategy)
         return
 
     def _sell_strategy_asset(self, strategy):
