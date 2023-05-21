@@ -1,3 +1,2 @@
-Binance Future testnet API: https://binance-docs.github.io/apidocs/futures/en/#change-log
-
-Binance Spot API: https://testnet.binance.vision/
+Binance Future testnet API: https://binance-docs.github.io/apidocs/futures/en
+Binance Spot API: https://binance-docs.github.io/apidocs/spot/en/
