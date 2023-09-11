@@ -44,8 +44,7 @@ def get_removed_row(prev_data, data):
     prevent_initial_call=True,
 )
 def start_websockets(*args):
-    for client in clients.values():
-        client.run()
+    [client.run() for client in clients.values()]
     return True
 
 
@@ -53,7 +52,7 @@ def start_websockets(*args):
 def subscribe_to_new_stream(value: str):
     if value:
         exchange, symbol = value.split(" ")
-        clients[exchange].new_subscribe('tickers', symbol)
+        clients[exchange].new_subscribe("tickers", symbol)
     return None
 
 
@@ -161,7 +160,7 @@ def start_strategy(
         ema = {"fast": fast_ema, "slow": slow_ema}
         macd = {"fast": fast_macd, "slow": slow_macd, "signal": macd_signal}
         exchange, symbol = contract.split(" ")
-        if exchange == 'Kucoin':
+        if exchange == "Kucoin":
             interval = intervals_convert[interval]
         TechnicalStrategies(
             client=clients[exchange],
@@ -197,3 +196,22 @@ def update_log_list(n, logs_list: List):
     if no_logs_count == len(clients):
         return no_update
     return logs_list
+
+
+@callback(
+    Output("assets-table", "data"),
+    Input("update-interval", "n_intervals"),
+    State("assets-table", "data"),
+)
+def update_assets_table(n, data):
+    data = [
+        {
+            "Asset": asset,
+            "Available Balance": balance.availableBalance,
+            "Total Balance": balance.totalBalance,
+        }
+        for client in clients.values()
+        for asset, balance in client.balance.items()
+        if asset in ["BTC", "USDT"]
+    ]
+    return data

@@ -44,8 +44,6 @@ class Strategy(ABC):
         sl: float,
         buy_pct: float,
     ):
-        # running_strategies variable is a dictionary where the key is the
-        # symbol and the values is another
         self.client = client
         self.symbol = symbol
         self.contract = self.client.contracts[symbol]
@@ -58,7 +56,6 @@ class Strategy(ABC):
         interval = re.match(r"[0-9]+[a-zA-Z]", interval).group(0)
         self.timeframe = intervals_to_sec[interval] * 1000
         self.client.new_subscribe("candles", symbol, self.interval)
-        self.client.add_log("Strategy added succesfully.", "info")
         self.ws_channel_key = f"{symbol}_{interval}"
         self.strategy_key = f"{self.ws_channel_key}_{Strategy.new_strategy_id}"
         self.client.running_startegies[self.strategy_key] = self
@@ -77,6 +74,7 @@ class Strategy(ABC):
         ]
         self.df = pd.DataFrame(data)
         self.order: Order
+        self.client.add_log(f"{self.symbol} Strategy added succesfully.", "info")
 
     def _update_candles(self, new_candle: CandleStick):
         last_candle = self.df.iloc[-1]
@@ -172,9 +170,9 @@ class TechnicalStrategies(Strategy):
             + 3 * int(self._upTrend)
         )
 
-        if confidence >= 7:
+        if confidence >= 6:
             return "buy or hodl"
-        elif confidence >= 4:
+        elif confidence < 3:
             return "sell or don't enter"
 
     def _EMA(self, window: int) -> pd.Series:

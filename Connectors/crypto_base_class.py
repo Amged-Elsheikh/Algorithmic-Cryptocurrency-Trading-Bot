@@ -3,7 +3,7 @@ import time
 from abc import ABC, abstractmethod, abstractproperty
 from collections import deque, namedtuple
 from threading import Thread
-from typing import TYPE_CHECKING, Dict, List, Union, Literal
+from typing import TYPE_CHECKING, Dict, List, Literal, Union
 
 import websocket
 from requests.models import Response
@@ -16,19 +16,20 @@ if TYPE_CHECKING:
 
 class CryptoExchange(ABC):
     def __init__(self):
-        self._queue_tuple = namedtuple("Logs", "msg, level")
-        self.logger: logging.Logger
+        self.logger: logging.Logger  # Logger is defined in the inherted class
         self.log_map = {
             "debug": self.logger.debug,
             "info": self.logger.info,
             "warning": self.logger.warning,
             "error": self.logger.error,
         }
-        self.log_queue = deque()
         self._queue_tuple = namedtuple("Logs", "msg, level")
+        self.log_queue = deque()
         # Websocket connection
         self._ws_connect = False
         self.id = 1
+        self.prices: Dict[str, Price]
+        self.balance: Dict[str, Balance]
         self.bookTicker_subscribtion_list: Dict[Contract, int] = dict()
         """
         running_startegies key: 'symbol_id'.\n
@@ -49,10 +50,6 @@ class CryptoExchange(ABC):
         the keys are the counter 'count' and the 'id' for the web socket
         """
 
-    @abstractmethod
-    def _init(self, is_spot: bool, is_test: bool) -> None:
-        pass
-
     @abstractproperty
     def exchange(self) -> str:
         pass
@@ -64,8 +61,8 @@ class CryptoExchange(ABC):
 
     @abstractmethod
     def _execute_request(
-        endpoint: str, params: Dict, http_method: str
-    ) -> Union[Response, None]:
+        self, endpoint: str, params: Dict, http_method: str
+    ) -> Response:
         pass
 
     @abstractmethod
@@ -81,39 +78,32 @@ class CryptoExchange(ABC):
         pass
 
     @abstractmethod
-    def _get_contracts(self) -> Union[Dict[str, Contract], None]:
+    def _get_contracts(self) -> Dict[str, Contract]:
         pass
 
     @abstractmethod
-    def get_candlestick(
-        self, contract: Contract, interval: str
-    ) -> Union[List[CandleStick], None]:
+    def get_candlestick(self, contract: Contract, interval: str) -> List[CandleStick]:
         pass
 
     @abstractmethod
-    def get_price(self, contract: Contract) -> Union[Price, None]:
+    def get_price(self, contract: Contract) -> Price:
         pass
 
     @abstractmethod
-    def make_order(self, contract: Contract, **kwargs) -> Union[Order, None]:
+    def make_order(self, contract: Contract, **kwargs) -> Order:
         pass
 
     @abstractmethod
-    def order_status(self, order: Order) -> Union[Order, None]:
+    def order_status(self, order: Order) -> Order:
         pass
 
     @abstractmethod
-    def delete_order(self, order: Order) -> Union[Order, None]:
+    def delete_order(self, order: Order) -> Order:
         pass
 
-    @abstractproperty
-    def balance(self) -> Union[Dict[str, Balance], None]:
+    @abstractmethod
+    def getBalance(self):
         pass
-
-    @balance.setter
-    def balance(self, *args, **kwargs) -> Dict[str, Balance]:
-        self.add_log(msg="Balance can't be edited manually", level="warning")
-        return self.balance
 
     def _start_ws(self):
         self._ws = websocket.WebSocketApp(
@@ -121,10 +111,11 @@ class CryptoExchange(ABC):
             on_open=self._on_open,
             on_close=self._on_close,
             on_error=self._on_error,
-            on_message=self._ws_on_message,
+            on_message=self._on_message,
         )
+        self._is_closed = False
         # Reopen the websocket connection if it terminated
-        while True:
+        while not self._is_closed:
             try:
                 if self._ws_connect:
                     # Reconnect unless the interface is closed by the user
@@ -149,9 +140,11 @@ class CryptoExchange(ABC):
     def _on_close(self, ws: websocket.WebSocketApp):
         self._ws_connect = False
         self.add_log(msg="Websocket disconnect", level="info")
+        self._is_closed = True
+        return
 
     @abstractmethod
-    def _ws_on_message(self, ws: websocket.WebSocketApp, msg):
+    def _on_message(self, ws: websocket.WebSocketApp, msg):
         pass
 
     def add_log(self, msg: str, level: str):
@@ -160,15 +153,10 @@ class CryptoExchange(ABC):
         self.log_queue.append(self._queue_tuple(msg, level))
 
     # ########################### Websocket Arguments ########################
-    # ########################### Websocket Arguments ########################
-    # ########################### Websocket Arguments ########################
     @abstractmethod
     def new_subscribe(
-        self,
-        channel: Literal["tickers", "candles"],
-        symbol: str,
-        interval: Union[str, None] = None,
-    ) -> None:
+        self, channel: Literal["tickers", "candles"], symbol: str, interval: str
+    ):
         pass
 
     @abstractmethod
@@ -178,7 +166,7 @@ class CryptoExchange(ABC):
         *,
         symbol: Union[str, None] = None,
         strategy: Union["Strategy", None] = None,
-    ) -> None:
+    ):
         pass
 
     # ########################### Strategy Arguments ##########################
@@ -187,7 +175,7 @@ class CryptoExchange(ABC):
         strategy.unpnl = self.prices[strategy.symbol].ask / buying_price - 1
         # Take Profit or Stop Loss check
         if strategy.unpnl >= strategy.tp or strategy.unpnl <= -1 * strategy.sl:
-            self._sell_strategy_asset(strategy)
+            self._sell_with_strategy(strategy)
         return
 
     @abstractmethod
@@ -195,5 +183,9 @@ class CryptoExchange(ABC):
         pass
 
     @abstractmethod
-    def _sell_strategy_asset(self, strategy: "Strategy"):
+    def _sell_with_strategy(self, strategy: "Strategy"):
+        pass
+
+    @abstractmethod
+    def _buy_with_strategy(self, strategy: "Strategy"):
         pass

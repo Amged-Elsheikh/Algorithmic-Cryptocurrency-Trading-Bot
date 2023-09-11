@@ -5,7 +5,7 @@ import logging
 import logging.config
 import os
 import time
-from typing import TYPE_CHECKING, Dict, Literal
+from typing import TYPE_CHECKING, Dict, Literal, Union
 from urllib.parse import urlencode
 
 import requests
@@ -24,57 +24,32 @@ logging.config.fileConfig("logger.config")
 
 
 class BinanceClient(CryptoExchange):
-    _loaded = dict()
-
-    def __new__(cls, is_spot: bool, is_test: bool):
-        if (client := cls._loaded.get(f"{is_spot} {is_test}")) is None:
-            client = super().__new__(cls)
-            cls._loaded[f"{is_spot} {is_test}"] = client
-        return client
-
-    def __init__(self, is_spot: bool, is_test: bool):
-        self.is_spot = is_spot
-        self.is_test = is_test
-        self._init(self)
+    def __init__(self, is_test: bool):
         self.logger = logging.getLogger(__name__)
         super().__init__()
-        self._check_internet_connection()
-        self.contracts = self._get_contracts()
-        self.prices: Dict[str, Price] = dict()
-
-    def _init(self):
-        urls = {
-            (True, True): (
-                "https://testnet.binance.vision/api",
-                "wss://testnet.binance.vision/ws",
-            ),
-            (True, False): (
-                "https://api.binance.com/api",
-                "wss://stream.binance.com:9443/ws",
-            ),
-            (False, True): (
-                "https://testnet.binancefuture.com/fapi",
-                "wss://stream.binancefuture.com/ws",
-            ),
-            (False, False): (
-                "https://fapi.binance.com/fapi",
-                "wss://fstream.binance.com/ws",
-            ),
+        self._endpoints = {
+            "ping": "/v3/ping",
+            "exchangeInfo": "/v3/exchangeInfo",
+            "klines": "/v3/klines",
+            "ticker": "/v3/ticker/bookTicker",
+            "order": "/v3/order",
+            "account": "/v3/account",
         }
-        self._base_url, self._ws_url = urls[(self.is_spot, self.is_test)]
-        spot_future = "Spot" if self.is_spot else "Future"
-        real_test = "Test" if self.is_test else ""
-        self._api_key = f"{self.exchange}{spot_future}{real_test}APIKey"
-        self._api_secret = self._api_key.replace("APIKey", "APISecret")
-        return
+        if is_test:
+            self._base_url = "https://testnet.binance.vision/api"
+            self._ws_url = "wss://testnet.binance.vision/ws"
+        else:
+            self._base_url = "https://api.binance.com/api"
+            self._ws_url = "wss://stream.binance.com:9443/ws"
+        # self._check_internet_connection()
+        self.prices: Dict[str, Price] = dict()
+        self.contracts = self._get_contracts()
+        self.getBalance()
 
     @property
     def _is_connected(self):
-        if self.is_spot:
-            endpoint = '/v3/ping'
-        else:
-            endpoint = '/v1/ping'
-        response = self._execute_request(endpoint, "GET")
+        endpoint = self._endpoints["ping"]
+        response = self._execute_request(endpoint, "GET", need_sign=False)
         try:
             response.raise_for_status()
             return True
@@ -86,7 +61,7 @@ class BinanceClient(CryptoExchange):
         while not self._is_connected:
             if connection_flag >= 5:
                 msg = f"{self.exchange} Client failed to connect"
-                self.add_log(msg, "warning")
+                self.add_log(msg, "error")
                 raise Exception(msg)
             else:
                 connection_flag += 1
@@ -99,172 +74,142 @@ class BinanceClient(CryptoExchange):
     def exchange(self):
         return "Binance"
 
-    def _execute_request(self, endpoint: str, http_method: str, params=dict()):
+    def _execute_request(
+        self, endpoint: str, http_method: str, params=dict(), need_sign=True
+    ):
         """This argument is used to send all types of requests to the server"""
+        headers = {
+            "X-MBX-APIKEY": os.getenv("BinanceSpotAPIKey"),
+            "Content-Type": "application/json",
+        }
         try:
-            # Get the timestamp
-            params["timestamp"] = int(time.time() * 1000)
-            # Generate the signature for the query
-            params["signature"] = self._generate_signature(urlencode(params))
-            _header = {
-                "X-MBX-APIKEY": os.getenv(self._api_key),
-                "Content-Type": "application/json"
-                }
+            if need_sign:
+                params["timestamp"] = int(time.time() * 1000)
+                params["signature"] = self._generate_signature(urlencode(params))
             response = requests.request(
-                method=http_method,
-                url=self._base_url + endpoint,
-                params=params,
-                headers=_header,
+                http_method, self._base_url + endpoint, params=params, headers=headers
             )
             response.raise_for_status()
             return response
         except RequestException as e:
-            self.add_log(f"Request error {e}", "warning")
+            self.add_log(f"Request Error msg: {response.text} {e}", "error")
         except Exception as e:
             self.add_log(f"Error {e}", "error")
-        return None
+        return
 
     def _generate_signature(self, query_string: str):
         return hmac.new(
-            key=os.getenv(self._api_secret).encode("utf-8"),
+            key=os.getenv("BinanceSpotAPISecret").encode("utf-8"),
             msg=query_string.encode("utf-8"),
             digestmod=hashlib.sha256,
         ).hexdigest()
 
     # ###################### MARKET DATA FUNCTION #######################
     def _get_contracts(self):
-        if self.is_spot:
-            endpoint = '"/v3/exchangeInfo"'
-        else:
-            endpoint = '"/v1/exchangeInfo"'
-        response = self._execute_request(endpoint, "GET")
+        endpoint = self._endpoints["exchangeInfo"]
+        response = self._execute_request(endpoint, "GET", need_sign=False)
         if response:
-            symbols = response.json()["symbols"]
             contracts = {
                 symbol["symbol"]: Contract(symbol, self.exchange)
-                for symbol in symbols
+                for symbol in response.json()["symbols"]
             }
             return contracts
-        return None
+        return
 
     def get_candlestick(self, contract: Contract, interval: str):
         """
         Get a list of the historical Candlestickes for given contract.
         """
-        if self.is_spot:
-            endpoint = '/v3/klines'
-        else:
-            endpoint = '/v1/klines'
+        endpoint = self._endpoints["klines"]
         params = {"symbol": contract.symbol, "interval": interval}
-        response = self._execute_request(endpoint, "GET", params)
+        response = self._execute_request(endpoint, "GET", params, need_sign=False)
         if response:
-            return [CandleStick(candle, self.exchange)
-                    for candle in response.json()]
-        return None
+            return [CandleStick(candle, self.exchange) for candle in response.json()]
+        return
 
-    def get_price(self, contract: Contract):
+    def get_price(self, contract: Union[Contract, str]):
         """Get the latest traded price for the contract."""
-        if self.is_spot:
-            endpoint = '/v3/ticker/bookTicker'
-        else:
-            endpoint = '/v1/ticker/bookTicker'
-        params = {"symbol": contract.symbol}
-        response = self._execute_request(endpoint, "GET", params)
+        endpoint = self._endpoints["ticker"]
+        symbol = contract if isinstance(contract, str) else contract.symbol
+        params = {"symbol": symbol}
+        response = self._execute_request(endpoint, "GET", params, need_sign=False)
         if response:
-            symbol = contract.symbol
             self.prices[symbol] = Price(response.json(), self.exchange)
             return self.prices[symbol]
-        return None
+        return
 
     # ######################### TRADE Arguments ##########################
-    def make_order(
-        self, contract: Contract, *, side: str, order_type: str, **kwargs
-    ):
+    def make_order(self, contract: Contract, *, side: str, order_type: str, **kwargs):
         """
         Make a Buy/Long or Sell/Short order for a given contract.
         This argument is a private argument and can only be accesed
         within the connecter, when a buying or selling signal is found,
         or when canceling the runnning strategy
         """
-        if self.is_spot:
-            endpoint = '/v3/order'
-        else:
-            endpoint = '/v1/order'
+        endpoint = self._endpoints["order"]
         # Add the mandotary parameters
         params = {"symbol": contract.symbol, "side": side, "type": order_type}
         # Add extra parameters
         params.update(kwargs)
         response = self._execute_request(endpoint, "POST", params)
         if response:
-            return Order(response.json(), self.exchange)
-        return None
+            order = Order(response.json(), self.exchange)
+            return self.order_status(order)
+        return
 
     def order_status(self, order: Order):
         """Get information of a given order."""
-        if self.is_spot:
-            endpoint = '/v3/order'
-        else:
-            endpoint = '/v1/order'
+        endpoint = self._endpoints["order"]
         params = {"symbol": order.symbol, "orderId": order.orderId}
         response = self._execute_request(endpoint, "GET", params)
         if response:
-            return Order(response.json(), self.exchange)
-        return None
+            return Order(response.json(), self.exchange, price=order.price)
+        return
 
     def delete_order(self, order: Order) -> Order:
         """
         Deleting an order. This argument is helpful for future trades,
         or when applying LIMIT/OCO orders."""
-        if self.is_spot:
-            endpoint = '/v3/order'
-        else:
-            endpoint = '/v1/order'
+        endpoint = self._endpoints["order"]
         params = {"symbol": order.symbol, "orderId": order.orderId}
         response = self._execute_request(endpoint, "DELETE", params)
         if response:
             return Order(response.json(), self.exchange)
-        return None
+        return
 
     # ######################### ACCOUNT Arguments ##########################
-    @property
-    def balance(self):
+    def getBalance(self):
         """
-        Return the amount of the currently holded assests in the wallet
+        Update the amount of the currently holded assests in the wallet
         """
-        if self.is_spot:
-            endpoint = '/v3/account'
-        else:
-            endpoint = '/v2/account'
+        endpoint = self._endpoints["account"]
         response = self._execute_request(endpoint, "GET")
         if response:
-            balance = {
+            self.balance = {
                 asset["asset"]: Balance(asset, self.exchange)
-                for asset in response.json()["assets"]
+                for asset in response.json()["balances"]
             }
-            return balance
-        return None
-
-    @balance.setter
-    def balance(self, *args, **kwargs):
-        self.add_log("Balance can't be edited manually", "warning")
-        return self.balance
+            return self.balance
+        return
 
     # ########################### Websocket Arguments ########################
     def new_subscribe(
         self, channel: Literal["tickers", "candles"], symbol, interval=""
     ):
-        contract = self.contracts[symbol]
-        if channel == "tickers":
+        contract = self.contracts.get(symbol)
+        if not contract:
+            self.add_log(msg=f"{symbol} is not correct", level="error")
+        elif channel == "tickers":
             self._bookTicket_subscribe(contract)
         elif channel == "candles":
             self._kline_subscribe(contract, interval)
+        return
 
     def _bookTicket_subscribe(self, contract: Contract):
         params = f"{contract.symbol.lower()}@bookTicker"
         if contract in self.bookTicker_subscribtion_list:
             self.add_log(f"Already subscribed to {params}", "info")
             return
-
         msg = {"method": "SUBSCRIBE", "params": [params], "id": self.id}
         # immediatly show current bid and ask prices.
         self.get_price(contract)
@@ -303,10 +248,8 @@ class BinanceClient(CryptoExchange):
         return
 
     def _bookTicker_unsubscribe(self, symbol: str):
-        running_contracts = set(
-            map(lambda x: x.split("_")[0], self.strategy_counter.keys())
-        )
-        if symbol in running_contracts:
+        running_strategies = [x.split("_")[0] for x in self.strategy_counter.keys()]
+        if symbol in running_strategies:
             msg = (
                 f"{symbol} had a running strategy and "
                 "can't be removed from the watchlist"
@@ -341,11 +284,12 @@ class BinanceClient(CryptoExchange):
         return
 
     # ########################### Strategy Arguments ##########################
-    def _ws_on_message(self, ws: websocket.WebSocketApp, msg):
+    def _on_message(self, ws: websocket.WebSocketApp, msg):
         data = json.loads(msg)
         channel = data.get("e")
         symbol = data.get("s")
-        if channel == "bookTicker":
+        # Spot websocket API does not show event name in case of bookTicker
+        if channel == "bookTicker" or (channel is None and "a" in data and "b" in data):
             self._bookTickerMsg(data, symbol)
         elif channel == "kline":
             self._klineMsg(data, symbol)
@@ -357,7 +301,7 @@ class BinanceClient(CryptoExchange):
         self.prices[symbol].ask = float(data["a"])
         # Check the status of the order for each running strategy
         for strategy in list(self.running_startegies.values()):
-            if symbol != strategy.symbol or hasattr(strategy, "order"):
+            if symbol != strategy.symbol or not hasattr(strategy, "order"):
                 continue
             if strategy.order.status in ["CANCELED", "REJECTED", "EXPIRED"]:
                 self._kline_unsubscribe(strategy)
@@ -381,62 +325,64 @@ class BinanceClient(CryptoExchange):
         candle = [data[i] for i in ["t", "o", "h", "l", "c", "v"]]
         sent_candle = CandleStick(candle, self.exchange)
         for strategy in list(self.running_startegies.values()):
-            key = f'{symbol}_{data["i"]}'
-            if hasattr(strategy, "order") and strategy.ws_channel_key == key:
+            if strategy.ws_channel_key == f'{symbol}_{data["i"]}':
                 decision = strategy.parse_trade(sent_candle)
                 self._process_dicision(strategy, decision)
-            else:
-                self._kline_unsubscribe(strategy)
         return
 
     def _process_dicision(self, strategy: "Strategy", decision: str):
         if decision == "buy or hodl" and not hasattr(strategy, "order"):
-            latest_price = strategy.df["close"].iloc[-1]
-            min_qty = 10 / latest_price
-            base_asset = strategy.contract.quoteAsset
-            balance = self.balance[base_asset].availableBalance
-            buy_margin = balance * strategy.buy_pct
-            quantity_margin = (buy_margin / latest_price) * 0.95
-            quantity_margin = round(
-                quantity_margin, strategy.contract.quantityPrecision
-            )
-            if quantity_margin > min_qty:
-                order = self.make_order(
-                    strategy.contract,
-                    side="BUY",
-                    order_type="MARKET",
-                    quantity=quantity_margin,
-                )
-                if order:
-                    order = self.order_status(order)
-                    strategy.order = order
-                    msg = (
-                        f"{strategy.order.symbol} buying order was made. "
-                        f"Quantity: {strategy.order.quantity}. "
-                        f"Price: {strategy.order.price}"
-                    )
-                    self.add_log(msg, "info")
-            else:
-                msg = (
-                    f"could not buy {self.strategy.contract.symbol}"
-                    "because the ordered quantity is less than the"
-                    "minimum margin. Strategy is removed"
-                )
-                self.add_log(msg, "info")
-                self._kline_unsubscribe(strategy)
+            self._buy_with_strategy(strategy)
+            self.getBalance()
         elif decision == "sell or don't enter" and hasattr(strategy, "order"):
-            # sell when there is an existing order and poor indicators
-            self._sell_strategy_asset(strategy)
+            self._sell_with_strategy(strategy)
+            self.getBalance()
         return
 
-    def _sell_strategy_asset(self, strategy):
+    def _buy_with_strategy(self, strategy: "Strategy"):
+        latest_price = strategy.df["close"].iloc[-1]
+        base_asset = strategy.contract.quoteAsset
+        balance = self.balance[base_asset].availableBalance
+        buy_margin = balance * strategy.buy_pct
+        quantity_margin = (buy_margin / latest_price) * 0.95
+        stepSize = strategy.contract.stepSize
+        quantity_margin = round(quantity_margin / stepSize) * stepSize
+        if quantity_margin < strategy.contract.minQuantity:
+            msg = (
+                f"could not buy {self.strategy.contract.symbol}"
+                "because the ordered quantity is less than the"
+                "minimum margin. Strategy is removed"
+            )
+            self.add_log(msg, "info")
+            self._kline_unsubscribe(strategy)
+            return
+        order = self.make_order(
+            strategy.contract,
+            side="BUY",
+            order_type="MARKET",
+            quantity=quantity_margin,
+        )
+        if order:
+            order.price = latest_price
+            order = self.order_status(order)
+            strategy.order = order
+            msg = (
+                f"{strategy.order.symbol} buying order was made. "
+                f"Quantity: {strategy.order.quantity}. "
+                f"Price: {strategy.order.price}"
+            )
+            self.add_log(msg, "info")
+        return
+
+    def _sell_with_strategy(self, strategy: "Strategy"):
         sell_order = self.make_order(
-            contract=self.strategy.contract,
+            contract=strategy.contract,
             side="SELL",
             order_type="MARKET",
             quantity=strategy.order.quantity,
         )
         if sell_order:
+            sell_order.price = strategy.df["close"].iloc[-1]
             while sell_order.status != "FILLED":
                 sell_order = self.order_status(sell_order)
                 time.sleep(2)
@@ -444,3 +390,6 @@ class BinanceClient(CryptoExchange):
             strategy.order = sell_order
             self._kline_unsubscribe(strategy)
         return
+
+    def close(self):
+        self._ws.close()

@@ -138,8 +138,7 @@ class KucoinClient(CryptoExchange):
         if response:
             symbols = response.json()["data"]
             contracts = {
-                symbol["symbol"]: Contract(symbol, self.exchange)
-                for symbol in symbols
+                symbol["symbol"]: Contract(symbol, self.exchange) for symbol in symbols
             }
             return contracts
         return None
@@ -149,9 +148,7 @@ class KucoinClient(CryptoExchange):
         Get a list of the historical Candlestickes for given contract.
         """
         params = {"symbol": contract.symbol, "type": interval}
-        response = self._execute_request(
-            "/api/v1/market/candles", "GET", params
-            )
+        response = self._execute_request("/api/v1/market/candles", "GET", params)
         if response:
             return [
                 CandleStick(candle, self.exchange)
@@ -172,9 +169,7 @@ class KucoinClient(CryptoExchange):
         return None
 
     # ######################### TRADE Arguments ##########################
-    def make_order(
-        self, contract: Contract, *, side: str, order_type: str, **kwargs
-    ):
+    def make_order(self, contract: Contract, *, side: str, order_type: str, **kwargs):
         """
         Make a Buy/Long or Sell/Short order for a given contract.
         This argument is a private argument and can only be accesed
@@ -214,7 +209,7 @@ class KucoinClient(CryptoExchange):
 
     # ######################### ACCOUNT Arguments ##########################
     @property
-    def balance(self) -> Dict[str, Balance] | None:
+    def getBalance(self) -> Dict[str, Balance] | None:
         """
         Return the amount of the currently holded assests in the wallet
         """
@@ -228,10 +223,10 @@ class KucoinClient(CryptoExchange):
             return balance
         return None
 
-    @balance.setter
-    def balance(self, *args, **kwargs):
+    @getBalance.setter
+    def getBalance(self, *args, **kwargs):
         self.add_log("Balance can't be edited manually", "warning")
-        return self.balance
+        return self.getBalance
 
     # ########################### Websocket Arguments ########################
     def _start_ws(self):
@@ -249,7 +244,7 @@ class KucoinClient(CryptoExchange):
             on_open=self._on_open,
             on_close=self._on_close,
             on_error=self._on_error,
-            on_message=self._ws_on_message,
+            on_message=self._on_message,
         )
         while True:
             try:
@@ -377,7 +372,7 @@ class KucoinClient(CryptoExchange):
         return
 
     # ########################### Strategy Arguments ##########################
-    def _ws_on_message(self, ws: websocket.WebSocketApp, msg):
+    def _on_message(self, ws: websocket.WebSocketApp, msg):
         """
         This is the argument that will form most of the connections between
         the backend and frontend by automating trades and send data to the UI
@@ -439,42 +434,43 @@ class KucoinClient(CryptoExchange):
 
     def _process_dicision(self, strategy: "Strategy", decision: str):
         if decision == "buy or hodl" and hasattr(strategy, "order"):
-            latest_price = strategy.df["close"].iloc[-1]
-            min_qty = 10 / latest_price
-            base_asset = strategy.contract.quoteAsset
-            balance = self.balance[base_asset].availableBalance
-            buy_margin = balance * strategy.buy_pct
-            quantity_margin = (buy_margin / latest_price) * 0.95
-            quantity_margin = round(
-                quantity_margin, strategy.contract.quantityPrecision
-            )
-            if quantity_margin > min_qty:
-                order = self.make_order(
-                    strategy.contract,
-                    side="buy",
-                    order_type="market",
-                    size=quantity_margin,
-                )
-                if order:
-                    strategy.order = order
-                    msg = (
-                        f"{strategy.order.symbol} buying order was made. "
-                        f"Quantity: {strategy.order.quantity}. "
-                        f"Price: {strategy.order.price}"
-                    )
-                    self.add_log(msg, "info")
-            else:
-                msg = (
-                    f"could not buy {self.strategy.contract.symbol}"
-                    "because the ordered quantity is less than the"
-                    "minimum margin"
-                )
-                self.add_log(msg, "info")
+            self._buy_with_strategy(strategy)
         elif decision == "sell or don't enter" and hasattr(strategy, "order"):
-            self._sell_strategy_asset(strategy)
+            self._sell_with_strategy(strategy)
         return
 
-    def _sell_strategy_asset(self, strategy):
+    def _buy_with_strategy(self, strategy: "Strategy"):
+        latest_price = strategy.df["close"].iloc[-1]
+        min_qty = 10 / latest_price
+        base_asset = strategy.contract.quoteAsset
+        balance = self.getBalance[base_asset].availableBalance
+        buy_margin = balance * strategy.buy_pct
+        quantity_margin = (buy_margin / latest_price) * 0.95
+        quantity_margin = round(quantity_margin, strategy.contract.quantityPrecision)
+        if quantity_margin > min_qty:
+            order = self.make_order(
+                strategy.contract,
+                side="buy",
+                order_type="market",
+                size=quantity_margin,
+            )
+            if order:
+                strategy.order = order
+                msg = (
+                    f"{strategy.order.symbol} buying order was made. "
+                    f"Quantity: {strategy.order.quantity}. "
+                    f"Price: {strategy.order.price}"
+                )
+                self.add_log(msg, "info")
+        else:
+            msg = (
+                f"could not buy {self.strategy.contract.symbol}"
+                "because the ordered quantity is less than the"
+                "minimum margin"
+            )
+            self.add_log(msg, "info")
+
+    def _sell_with_strategy(self, strategy: "Strategy"):
         sell_order = self.make_order(
             contract=self.strategy.contract,
             side="sell",
